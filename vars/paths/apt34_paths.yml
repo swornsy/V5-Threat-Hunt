@@ -1,0 +1,155 @@
+apt34_paths:
+
+
+  execution:
+
+    - name: inline_execution
+
+      command: |
+
+        Write-Output "Simulated execution"
+
+      technique: T1059.001
+
+
+
+  persistence:
+
+    - name: scheduled_task
+
+      command: |
+
+        schtasks /create /tn "Updater" /tr "powershell.exe" /sc daily /f
+
+      technique: T1053.005
+
+
+    - name: service_creation
+
+      command: |
+
+        Write-Output "Simulated service persistence (admin required)"
+
+      technique: T1543.003
+
+
+
+  identity:
+
+    - name: enumerate_users
+
+      command: |
+
+        try {
+
+          $out = net user /domain 2>&1
+
+          if ($LASTEXITCODE -ne 0) {
+
+            Write-Output "Domain enumeration blocked - falling back to local"
+
+            net user
+
+          } else {
+
+            $out
+
+          }
+
+        } catch {
+
+          Write-Output "Enumeration failed"
+
+        }
+
+      technique: T1087.002
+
+
+    - name: enumerate_admins
+
+      command: |
+
+        try {
+
+          $out = net group "Domain Admins" /domain 2>&1
+
+          if ($LASTEXITCODE -ne 0) {
+
+            Write-Output "Admin enumeration blocked (low privilege)"
+
+          } else {
+
+            $out
+
+          }
+
+        } catch {
+
+          Write-Output "Admin enumeration failed"
+
+        }
+
+      technique: T1087.002
+
+
+    - name: escalate_user
+
+      command: |
+
+        Write-Output "Attempting privilege escalation"
+
+      technique: T1098
+
+
+
+  lateral:
+
+    - name: wmi_execution
+
+      command: |
+
+        wmic process call create "notepad.exe"
+
+      technique: T1047
+
+
+    - name: credential_replay
+
+      command: |
+
+        Write-Output "Simulated credential reuse"
+
+      technique: T1078
+
+
+
+  c2:
+
+    - name: dns_beacon
+
+      command: |
+
+        nslookup example.com
+
+      technique: T1071.004
+
+
+
+  exfil:
+
+    - name: compress_data
+
+      command: |
+
+        Write-Output "Compressing data"
+
+      technique: T1560.001
+
+
+    - name: staged_copy
+
+      command: |
+
+        Write-Output "Simulated exfiltration"
+
+      technique: T1041

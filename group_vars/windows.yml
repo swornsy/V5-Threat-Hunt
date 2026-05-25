@@ -1,0 +1,14 @@
+ansible_connection: "winrm"
+
+ansible_port: 5985
+
+
+ansible_user: "Sorensen.test\\m.magdelena"
+
+ansible_password: "10Ek!d0S[1qX*d[=o^k&"
+
+
+ansible_winrm_transport: "ntlm"
+
+ansible_winrm_server_cert_validation: "ignore"
+

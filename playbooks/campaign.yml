@@ -1,0 +1,21 @@
+- hosts: windows
+
+  gather_facts: yes
+
+
+  vars_files:
+
+    - ../vars/actors/apt34.yml
+
+    - ../vars/chains/apt34_chain.yml
+
+    - ../vars/paths/apt34_paths.yml
+
+
+  roles:
+
+    - users
+
+    - normal_activity
+
+    - engine

@@ -1,0 +1,270 @@
+# ----------------------------
+
+# SELECT TARGET GROUP
+
+# ----------------------------
+
+
+- name: Select target group
+
+  set_fact:
+
+    target_group: "{{ step.target }}"
+
+
+# ----------------------------
+
+# SELECT PRIMARY HOST
+
+# ----------------------------
+
+
+- name: Select primary host
+
+  set_fact:
+
+    primary_host: "{{ compromised_hosts | random }}"
+
+
+# ----------------------------
+
+# SELECT SECONDARY HOST
+
+# ----------------------------
+
+
+- name: Select secondary host
+
+  set_fact:
+
+    secondary_host: "{{ (groups[target_group] | difference(compromised_hosts)) | random }}"
+
+  when: (groups[target_group] | difference(compromised_hosts)) | length > 0
+
+
+# ----------------------------
+
+# SELECT TECHNIQUE
+
+# ----------------------------
+
+
+- name: Select technique
+
+  set_fact:
+
+    selected_action: "{{ apt34_paths[step.ttp] | random }}"
+
+
+# ----------------------------
+
+# DETERMINE CURRENT PRIVILEGE
+
+# ----------------------------
+
+
+- name: Determine highest privilege
+
+  set_fact:
+
+    current_privilege: >-
+
+      {{
+
+        'domain_admin' if (compromised_identities | selectattr('privilege','equalto','domain_admin') | list | length) > 0
+
+        else 'admin' if (compromised_identities | selectattr('privilege','equalto','admin') | list | length) > 0
+
+        else 'user'
+
+      }}
+
+
+# ----------------------------
+
+# ACTION PERMISSION LOGIC
+
+# ----------------------------
+
+
+- name: Check if action is allowed
+
+  set_fact:
+
+    action_allowed: >-
+
+      {{
+
+        False if (current_privilege == 'user' and selected_action.name in ['enumerate_admins','escalate_user','service_creation'])
+
+        else True
+
+      }}
+
+
+# ----------------------------
+
+# IDENTITY PHASE - PRIVILEGE PROGRESSION
+
+# ----------------------------
+
+
+- name: Capture admin credentials
+
+  set_fact:
+
+    compromised_identities: "{{ compromised_identities + [{'name':'svc_admin','privilege':'admin'}] }}"
+
+  when:
+
+    - step.phase == "identity"
+
+    - current_privilege == "user"
+
+
+- name: Capture domain admin credentials
+
+  set_fact:
+
+    compromised_identities: "{{ compromised_identities + [{'name':'da_account','privilege':'domain_admin'}] }}"
+
+  when:
+
+    - step.phase == "identity"
+
+    - current_privilege == "admin"
+
+
+# ----------------------------
+
+# DETERMINE LATERAL CAPABILITY
+
+# ----------------------------
+
+
+- name: Determine lateral capability
+
+  set_fact:
+
+    can_lateral: "{{ current_privilege in ['admin','domain_admin'] }}"
+
+  when: step.phase == "lateral_movement"
+
+
+# ----------------------------
+
+# EXECUTE PRIMARY ACTION
+
+# ----------------------------
+
+
+- name: Execute primary action
+
+  delegate_to: "{{ primary_host }}"
+
+  win_shell: "{{ selected_action.command }}"
+
+  ignore_errors: true
+
+  when: action_allowed
+
+
+# ----------------------------
+
+# EXECUTE SECONDARY ACTION
+
+# ----------------------------
+
+
+- name: Execute secondary action
+
+  delegate_to: "{{ secondary_host }}"
+
+  win_shell: "{{ selected_action.command }}"
+
+  ignore_errors: true
+
+  when:
+
+    - action_allowed
+
+    - secondary_host is defined
+
+    - step.phase in ['lateral_movement', 'command_and_control']
+
+    - can_lateral | default(true)
+
+
+# ----------------------------
+
+# ADD NEW COMPROMISED HOST
+
+# ----------------------------
+
+
+- name: Add new compromised host
+
+  set_fact:
+
+    compromised_hosts: "{{ compromised_hosts + [secondary_host] }}"
+
+  when:
+
+    - action_allowed
+
+    - secondary_host is defined
+
+    - step.phase == "lateral_movement"
+
+    - can_lateral | default(true)
+
+
+# ----------------------------
+
+# LOGGING
+
+# ----------------------------
+
+
+- name: Log primary execution
+
+  include_role:
+
+    name: report
+
+  vars:
+
+    action: "{{ selected_action.name }}"
+
+    technique: "{{ selected_action.technique }}"
+
+    mitre_phase: "{{ step.phase }}"
+
+    host: "{{ primary_host }}"
+
+    privilege: "{{ current_privilege }}"
+
+
+- name: Log secondary execution
+
+  include_role:
+
+    name: report
+
+  vars:
+
+    action: "{{ selected_action.name }}_secondary"
+
+    technique: "{{ selected_action.technique }}"
+
+    mitre_phase: "{{ step.phase }}"
+
+    host: "{{ secondary_host }}"
+
+    privilege: "{{ current_privilege }}"
+
+  when:
+
+    - secondary_host is defined
+
+    - step.phase in ['lateral_movement', 'command_and_control']

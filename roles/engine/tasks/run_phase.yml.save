@@ -1,0 +1,147 @@
+
+
+# ----------------------------
+
+# SELECT TARGET GROUP
+
+# ----------------------------
+
+
+- name: Select target group
+
+  set_fact:
+
+    target_group: "{{ step.target }}"
+
+
+# ----------------------------
+
+# SELECT PRIMARY HOST
+
+# ----------------------------
+
+
+- name: Select primary host
+
+  set_fact:
+
+    primary_host: "{{ groups[target_group] | random }}"
+
+
+# ----------------------------
+
+# SELECT SECONDARY HOST (MULTI-HOP)
+
+# ----------------------------
+
+
+- name: Select secondary host (multi-hop)
+
+  set_fact:
+
+    secondary_host: "{{ (groups[target_group] | difference([primary_host])) | random }}"
+
+  when: groups[target_group] | length > 1
+
+
+# ----------------------------
+
+# SELECT TECHNIQUE
+
+# ----------------------------
+
+
+- name: Select technique for phase
+
+  set_fact:
+
+    selected_action: "{{ apt34_paths[step.ttp] | random }}"
+
+
+# ----------------------------
+
+# EXECUTE PRIMARY ACTION
+
+# ----------------------------
+
+
+- name: Execute primary action
+
+  delegate_to: "{{ primary_host }}"
+
+  win_shell: "{{ selected_action.command }}"
+
+
+# ----------------------------
+
+# OPTIONAL SECONDARY EXECUTION
+
+# ----------------------------
+
+
+- name: Execute secondary action (multi-hop)
+
+  delegate_to: "{{ secondary_host }}"
+
+  win_shell: "{{ selected_action.command }}"
+
+  when:
+
+    - secondary_host is defined
+
+    - step.phase in ['lateral_movement', 'command_and_control']
+
+
+# ----------------------------
+
+# LOG PRIMARY EXECUTION
+
+# ----------------------------
+
+
+- name: Log primary execution
+
+  include_role:
+
+    name: report
+
+  vars:
+
+    action: "{{ selected_action.name }}"
+
+    technique: "{{ selected_action.technique }}"
+
+    mitre_phase: "{{ step.phase }}"
+
+    host: "{{ primary_host }}"
+
+
+# ----------------------------
+
+# LOG SECONDARY EXECUTION
+
+# ----------------------------
+
+
+- name: Log secondary execution
+
+  include_role:
+
+    name: report
+
+  vars:
+
+    action: "{{ selected_action.name }}_secondary"
+
+    technique: "{{ selected_action.technique }}"
+
+    mitre_phase: "{{ step.phase }}"
+
+    host: "{{ secondary_host }}"
+
+  when:
+
+    - secondary_host is defined
+
+    - step.phase in ['lateral_movement', 'command_and_control']
+

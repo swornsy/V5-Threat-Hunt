@@ -1,0 +1,96 @@
+# ----------------------------
+
+# GENERATE CAMPAIGN ID
+
+# ----------------------------
+
+
+- name: Generate campaign ID
+
+  set_fact:
+
+    campaign_id: "{{ lookup('password', '/dev/null chars=ascii_letters length=8') }}"
+
+  run_once: true
+
+
+# ----------------------------
+
+# SELECT INITIAL FOOTHOLD
+
+# ----------------------------
+
+
+- name: Select initial foothold host
+
+  set_fact:
+
+    compromised_host: "{{ groups['workstations'] | random }}"
+
+  run_once: true
+
+
+# ----------------------------
+
+# INITIALISE STATE
+
+# ----------------------------
+
+
+- name: Initialise compromised hosts
+
+  set_fact:
+
+    compromised_hosts: ["{{ compromised_host }}"]
+
+  run_once: true
+
+
+- name: Initialise identities (start low privilege)
+
+  set_fact:
+
+    compromised_identities:
+
+      - name: "initial_user"
+
+        privilege: "user"
+
+  run_once: true
+
+
+# ----------------------------
+
+# SET EXECUTION CHAIN
+
+# ----------------------------
+
+
+- name: Set execution chain
+
+  set_fact:
+
+    chain_to_run: "{{ attack_chain }}"
+
+  run_once: true
+
+
+# ----------------------------
+
+# RUN ATTACK CHAIN
+
+# ----------------------------
+
+
+- name: Run MITRE attack chain
+
+  include_tasks: run_phase.yml
+
+  loop: "{{ chain_to_run }}"
+
+  loop_control:
+
+    loop_var: step
+
+  run_once: true
+

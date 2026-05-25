@@ -1,0 +1,44 @@
+[workstations]
+
+wks01 ansible_host=10.10.20.10
+
+wks02 ansible_host=10.10.20.20
+
+
+[domain_controller]
+
+dc01 ansible_host=10.10.0.10
+
+[file_servers]
+
+fs01 ansible_host=10.10.10.10
+
+[certificate_authority]
+
+ca01 ansible_host=10.10.0.20
+
+[security
+
+wef01 ansible_host=10.10.30.10
+
+
+[windows:children]
+
+workstations
+
+servers
+
+
+[windows:vars]
+
+ansible_user= "Sorensen.test\\m.magdelena"
+
+ansible_password= "10Ek!d0S[1qX*d[=o^k&"
+
+ansible_connection=winrm
+
+ansible_port=5985
+
+ansible_winrm_transport=ntlm
+
+ansible_winrm_server_cert_validation=ignore

@@ -1,0 +1,11 @@
+- name: Write attack log
+
+  delegate_to: localhost
+
+  lineinfile:
+
+    path: /tmp/adversary_report.txt
+
+    line: "{{ campaign_id }} | {{ host }} | {{ ansible_date_time.iso8601 }} | {{ mitre_phase }} | {{ action }} | {{ technique }}"
+
+    create: yes

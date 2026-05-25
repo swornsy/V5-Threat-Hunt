@@ -1,0 +1,12 @@
+- name: Simulate users
+
+  win_shell: |
+
+    for ($i=0; $i -lt 5; $i++) {
+
+      Start-Process notepad.exe
+
+      Start-Sleep -Seconds 1
+
+    }
+

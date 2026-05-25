@@ -1,0 +1,42 @@
+attack_chain:
+
+  - phase: execution
+
+    ttp: execution
+
+    target: workstations
+
+
+  - phase: persistence
+
+    ttp: persistence
+
+    target: workstations
+
+
+  - phase: privilege_escalation
+
+    ttp: identity
+
+    target: domain_controller
+
+
+  - phase: lateral_movement
+
+    ttp: lateral
+
+    target: file_servers
+
+
+  - phase: command_and_control
+
+    ttp: c2
+
+    target: workstations
+
+
+  - phase: exfiltration
+
+    ttp: exfil
+
+    target: file_servers

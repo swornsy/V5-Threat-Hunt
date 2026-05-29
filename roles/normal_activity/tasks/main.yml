@@ -1,69 +1,19 @@
-- name: Simulate random DNS queries
+- name: Normal activity - user
 
-  win_shell: |
+  debug:
 
-    $domains = @(
-
-      "google.com","microsoft.com","bbc.co.uk",
-
-      "amazon.com","github.com","office.com",
-
-      "facebook.com","youtube.com","bing.com"
-
-    )
+    msg: "[NORMAL] User activity"
 
 
-    $count = Get-Random -Minimum 3 -Maximum 10
+- name: Normal activity - admin
+
+  debug:
+
+    msg: "[NORMAL] Admin tasks"
 
 
-    for ($i=0; $i -lt $count; $i++) {
+- name: Normal activity - DNS
 
-      $d = Get-Random $domains
+  debug:
 
-      nslookup $d
-
-      Start-Sleep -Seconds (Get-Random -Minimum 1 -Maximum 4)
-
-    }
-
-- name: Simulate DNS burst traffic
-
-  win_shell: |
-
-    $domains = @("cdn.microsoft.com","api.twitter.com","cloudflare.com")
-
-
-    for ($i=0; $i -lt 5; $i++) {
-
-      nslookup $domains[(Get-Random -Minimum 0 -Maximum 3)]
-
-    }
-
-- name: Simulate beaconing traffic
-
-  win_shell: |
-
-    $interval = Get-Random -Minimum 5 -Maximum 15
-
-
-    for ($i=0; $i -lt 3; $i++) {
-
-      nslookup example.org
-
-      Start-Sleep -Seconds $interval
-
-      $interval = Get-Random -Minimum 5 -Maximum 20
-
-    }
-
-- name: Simulate HTTP beacon
-
-  win_shell: |
-
-    for ($i=0; $i -lt 3; $i++) {
-
-      Invoke-WebRequest http://example.com -UseBasicParsing
-
-      Start-Sleep -Seconds (Get-Random -Minimum 10 -Maximum 30)
-
-    }
+    msg: "[NORMAL] DNS queries"

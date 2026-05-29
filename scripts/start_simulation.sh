@@ -1,221 +1,348 @@
 #!/bin/bash
 
 
-clear
+echo "=============================="
+
+echo " Threat Simulation Framework"
+
+echo "=============================="
 
 
-echo "======================================"
+# ----------------------------
 
-echo "   APT SIMULATION CONTROL PANEL V3"
+# GET ATTRIBUTIONS
 
-echo "======================================"
-
-echo ""
+# ----------------------------
 
 
-# ------------ ACTOR SELECTION ------------
+ATTR_LIST=$(python3 -c "import yaml; d=yaml.safe_load(open('vars/apt_catalog.yml')); print('|'.join(d['apt_catalog'].keys()))")
 
 
-echo "Select Actor:"
-
-echo "1 - APT34"
-
-read ACTOR
-
-
-case $ACTOR in
-
-1) actor="vars/actors/apt34.yml" ;;
-
-*) echo "Invalid selection"; exit 1 ;;
-
-esac
-
-
-# ------------ MODE SELECTION ------------
+IFS='|' read -ra ATTR_ARRAY <<< "$ATTR_LIST"
 
 
 echo ""
 
-echo "Select Execution Mode:"
-
-echo "1 - Full Campaign (Complete MITRE chain per run)"
-
-echo "2 - Stateful Attack (One phase per run)"
-
-read MODE_SELECT
+echo "Select Attribution:"
 
 
-if [ "$MODE_SELECT" == "1" ]; then
+select attribution in "${ATTR_ARRAY[@]}"; do
 
-  mode="full"
+  [[ -n "$attribution" ]] && break
 
-elif [ "$MODE_SELECT" == "2" ]; then
-
-  mode="stateful"
-
-else
-
-  echo "Invalid selection"
-
-  exit 1
-
-fi
+done
 
 
-# ------------ DURATION SELECTION ------------
+echo "DEBUG: attribution=$attribution"
 
 
-echo ""
+# ----------------------------
 
-echo "Select Duration:"
+# GET ACTORS
 
-echo "1 - Short (30–60 minutes)"
-
-echo "2 - Medium (12–24 hours)"
-
-echo "3 - Long (24–72 hours)"
-
-echo "4 - Continuous"
-
-read DURATION
+# ----------------------------
 
 
-case $DURATION in
+ACTOR_LINES=$(python3 -c "
 
-1)
+import yaml
 
-  total_runtime=3600
+d=yaml.safe_load(open('vars/apt_catalog.yml'))
 
-  sleep_min=180
+actors=d['apt_catalog'].get(\"$attribution\", [])
 
-  sleep_max=420
+out=[]
 
-  ;;
+for i,a in enumerate(actors):
 
-2)
+    name=str(a.get('name','')).replace('|',' ')
 
-  total_runtime=86400
+    aid=str(a.get('id',''))
 
-  sleep_min=600
+    grp=str(a.get('groups','')).replace('|',' ')
 
-  sleep_max=1800
+    desc=str(a.get('description','')).replace('\\n',' ').replace('|',' ')
 
-  ;;
+    out.append(f'{i+1}|{name}|{aid}|{grp}|{desc}')
 
-3)
+print('|||'.join(out))
 
-  total_runtime=259200
+")
 
-  sleep_min=900
 
-  sleep_max=3600
-
-  ;;
-
-4)
-
-  total_runtime=999999999
-
-  sleep_min=600
-
-  sleep_max=1800
-
-  ;;
-
-*)
-
-  echo "Invalid selection"; exit 1 ;;
-
-esac
+IFS='|||' read -ra ACTOR_ARRAY <<< "$ACTOR_LINES"
 
 
 echo ""
 
-echo "[+] Actor: $actor"
-
-echo "[+] Mode: $mode"
-
-echo "[+] Simulation starting..."
-
-echo ""
+echo "Available Actors:"
 
 
-start_time=$(date +%s)
+for line in "${ACTOR_ARRAY[@]}"; do
 
-run=1
-
-phase_index=0
-
-
-phases=("execution" "persistence" "identity" "lateral" "c2" "exfil")
-
-
-# ------------ MAIN LOOP ------------
-
-
-while true
-
-do
-
-  current_time=$(date +%s)
-
-  elapsed=$((current_time - start_time))
-
-
-  if [ $elapsed -ge $total_runtime ]; then
-
-    break
-
-  fi
-
-
-  echo ""
-
-  echo "--------------------------------------"
-
-  echo "[+] Run $run"
-
-  echo "--------------------------------------"
-
-
-  if [ "$mode" == "full" ]; then
-
-
-    ansible-playbook -i inventory/hosts.ini playbooks/campaign.yml -e "actor_file=$actor"
-
-
-  else
-
-    current_phase=${phases[$phase_index]}
-
-
-    echo "[+] Stateful phase: $current_phase"
-
-
-    ansible-playbook -i inventory/hosts.ini playbooks/campaign.yml \
-
-    -e "actor_file=$actor single_phase=$current_phase"
-
-
-    phase_index=$(( (phase_index + 1) % ${#phases[@]} ))
-
-  fi
-
-
-  sleep_time=$((sleep_min + RANDOM % (sleep_max - sleep_min + 1)))
-
-
-  echo "[+] Sleeping for $sleep_time seconds..."
-
-  sleep $sleep_time
-
-
-  run=$((run + 1))
+  echo "$line" | awk -F'|' '{print $1") "$2}'
 
 done
 
 
 echo ""
 
-echo "[✓] Simulation complete"
+read -p "Select actor number: " choice
+
+
+SELECTED="${ACTOR_ARRAY[$((choice-1))]}"
+
+
+echo "DEBUG: raw selection=$SELECTED"
+
+
+actor_name=$(echo "$SELECTED" | cut -d'|' -f2)
+
+actor_id=$(echo "$SELECTED" | cut -d'|' -f3)
+
+actor_groups=$(echo "$SELECTED" | cut -d'|' -f4)
+
+actor_desc=$(echo "$SELECTED" | cut -d'|' -f5-)
+
+
+echo "DEBUG: actor_name=$actor_name"
+
+echo "DEBUG: actor_id=$actor_id"
+
+
+# ----------------------------
+
+# VALIDATION
+
+# ----------------------------
+
+
+if [[ -z "$actor_id" ]]; then
+
+  echo "❌ ERROR: Actor ID is empty"
+
+  exit 1
+
+fi
+
+
+# ----------------------------
+
+# CONFIRM
+
+# ----------------------------
+
+
+echo ""
+
+echo "=== Actor Selected ==="
+
+echo "Name: $actor_name"
+
+echo ""
+
+echo "Groups: $actor_groups"
+
+echo ""
+
+echo "Description:"
+
+echo "$actor_desc"
+
+echo ""
+
+
+read -p "Proceed? (yes/no): " confirm
+
+[[ "$confirm" != "yes" ]] && exit 1
+
+
+# ----------------------------
+
+# MODE
+
+# ----------------------------
+
+
+echo ""
+
+echo "Select Mode:"
+
+echo "1) Single"
+
+echo "2) Full"
+
+echo "3) Temporal"
+
+
+read -p "Choice: " m
+
+
+case $m in
+
+  1) attack_mode="single" ;;
+
+  2) attack_mode="full" ;;
+
+  3) attack_mode="temporal" ;;
+
+  *) echo "Invalid mode"; exit 1 ;;
+
+esac
+
+
+echo "DEBUG: mode=$attack_mode"
+
+
+# ----------------------------
+
+# BEHAVIOUR
+
+# ----------------------------
+
+
+echo ""
+
+echo "Select Behaviour:"
+
+echo "1) Noisy"
+
+echo "2) Medium"
+
+echo "3) Stealthy"
+
+echo "4) Mixed"
+
+
+read -p "Choice: " b
+
+
+case $b in
+
+  1) attack_behaviour="noisy" ;;
+
+  2) attack_behaviour="medium" ;;
+
+  3) attack_behaviour="stealthy" ;;
+
+  4) attack_behaviour="mixed" ;;
+
+  *) attack_behaviour="mixed" ;;
+
+esac
+
+
+echo "DEBUG: behaviour=$attack_behaviour"
+
+
+# ----------------------------
+
+# DURATION (YOUR MODEL ✅)
+
+# ----------------------------
+
+
+echo ""
+
+echo "Select exercise duration:"
+
+echo "1) 30-60 minutes"
+
+echo "2) 12-24 hours"
+
+echo "3) 24-72 hours"
+
+echo "4) Continuous"
+
+
+read -p "Choice: " d
+
+
+case $d in
+
+  1) duration=60 ;;
+
+  2) duration=1440 ;;
+
+  3) duration=4320 ;;
+
+  4) duration=999999 ;;
+
+  *) duration=60 ;;
+
+esac
+
+
+echo "DEBUG: duration=$duration"
+
+
+# ----------------------------
+
+# FINAL DEBUG
+
+# ----------------------------
+
+
+echo ""
+
+echo "=============================="
+
+echo " FINAL DEBUG"
+
+echo "=============================="
+
+echo "selected_actor_name=$actor_name"
+
+echo "selected_actor_id=$actor_id"
+
+echo "attack_mode=$attack_mode"
+
+echo "attack_behaviour=$attack_behaviour"
+
+echo "attack_duration=$duration"
+
+echo "=============================="
+
+
+# ----------------------------
+
+# ✅ WRITE RUNTIME VARS FILE (FIXES YOUR ERROR)
+
+# ----------------------------
+
+
+cat > runtime_vars.yml <<EOF
+
+selected_actor_name: "$actor_name"
+
+selected_actor_id: "$actor_id"
+
+attack_mode: "$attack_mode"
+
+attack_behaviour: "$attack_behaviour"
+
+attack_duration: "$duration"
+
+EOF
+
+
+echo ""
+
+echo "DEBUG: runtime_vars.yml created:"
+
+cat runtime_vars.yml
+
+
+# ----------------------------
+
+# RUN ANSIBLE ✅
+
+# ----------------------------
+
+
+ansible-playbook site.yml -vv -e "@runtime_vars.yml"
+
+
+echo ""
+
+echo "✅ Simulation complete"

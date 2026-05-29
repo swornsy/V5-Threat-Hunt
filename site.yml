@@ -1,0 +1,19 @@
+---
+
+- name: Run Threat Simulation
+
+  hosts: localhost
+
+  gather_facts: false
+
+
+  vars_files:
+
+    - vars/mitre_attack_matrix.yml
+
+    - vars/apt_catalog.yml
+
+
+  roles:
+
+    - engine

@@ -1,270 +1,191 @@
 # ----------------------------
 
-# SELECT TARGET GROUP
+# DELAYAL)# DELAY
 
 # ----------------------------
 
 
-- name: Select target group
+- set_fact:
 
-  set_fact:
+    selected_action: "{{ step }}"
 
-    target_group: "{{ step.target }}"
+  when: attack_mode == "temporal"
 
 
 # ----------------------------
 
-# SELECT PRIMARY HOST
+# ACTION (SCORING)
 
 # ----------------------------
 
 
-- name: Select primary host
+- block:
 
-  set_fact:
+
+    - set_fact:
+
+        candidates: "{{ actor_data[current_phase] | default([]) }}"
+
+
+    - set_fact:
+
+        candidates: "{{ candidates | rejectattr('technique','in',used_techniques) | list }}"
+
+
+    - set_fact:
+
+        candidates: "{{ candidates if candidates else actor_data[current_phase] }}"
+
+
+    - set_fact:
+
+        selected_action: "{{ (candidates | sort(attribute='score.stealth'))[0] }}"
+
+      when: candidates | length > 0
+
+
+  when: attack_mode != "temporal"
+
+
+# ----------------------------
+
+# TRACK TECHNIQUES
+
+# ----------------------------
+
+
+- set_fact:
+
+    used_techniques: "{{ used_techniques + [selected_action.technique] }}"
+
+
+# ----------------------------
+
+# MULTI-HOST MODEL ✅
+
+# ----------------------------
+
+
+- set_fact:
 
     primary_host: "{{ compromised_hosts | random }}"
 
 
-# ----------------------------
+- set_fact:
 
-# SELECT SECONDARY HOST
-
-# ----------------------------
-
-
-- name: Select secondary host
-
-  set_fact:
-
-    secondary_host: "{{ (groups[target_group] | difference(compromised_hosts)) | random }}"
-
-  when: (groups[target_group] | difference(compromised_hosts)) | length > 0
-
-
-# ----------------------------
-
-# SELECT TECHNIQUE
-
-# ----------------------------
-
-
-- name: Select technique
-
-  set_fact:
-
-    selected_action: "{{ apt34_paths[step.ttp] | random }}"
-
-
-# ----------------------------
-
-# DETERMINE CURRENT PRIVILEGE
-
-# ----------------------------
-
-
-- name: Determine highest privilege
-
-  set_fact:
-
-    current_privilege: >-
-
-      {{
-
-        'domain_admin' if (compromised_identities | selectattr('privilege','equalto','domain_admin') | list | length) > 0
-
-        else 'admin' if (compromised_identities | selectattr('privilege','equalto','admin') | list | length) > 0
-
-        else 'user'
-
-      }}
-
-
-# ----------------------------
-
-# ACTION PERMISSION LOGIC
-
-# ----------------------------
-
-
-- name: Check if action is allowed
-
-  set_fact:
-
-    action_allowed: >-
-
-      {{
-
-        False if (current_privilege == 'user' and selected_action.name in ['enumerate_admins','escalate_user','service_creation'])
-
-        else True
-
-      }}
-
-
-# ----------------------------
-
-# IDENTITY PHASE - PRIVILEGE PROGRESSION
-
-# ----------------------------
-
-
-- name: Capture admin credentials
-
-  set_fact:
-
-    compromised_identities: "{{ compromised_identities + [{'name':'svc_admin','privilege':'admin'}] }}"
+    secondary_host: "{{ (groups['windows'] | difference(compromised_hosts)) | random }}"
 
   when:
 
-    - step.phase == "identity"
+    - current_phase == "lateral_movement"
 
-    - current_privilege == "user"
-
-
-- name: Capture domain admin credentials
-
-  set_fact:
-
-    compromised_identities: "{{ compromised_identities + [{'name':'da_account','privilege':'domain_admin'}] }}"
-
-  when:
-
-    - step.phase == "identity"
-
-    - current_privilege == "admin"
+    - (groups['windows'] | difference(compromised_hosts)) | length > 0
 
 
-# ----------------------------
-
-# DETERMINE LATERAL CAPABILITY
-
-# ----------------------------
-
-
-- name: Determine lateral capability
-
-  set_fact:
-
-    can_lateral: "{{ current_privilege in ['admin','domain_admin'] }}"
-
-  when: step.phase == "lateral_movement"
-
-
-# ----------------------------
-
-# EXECUTE PRIMARY ACTION
-
-# ----------------------------
-
-
-- name: Execute primary action
-
-  delegate_to: "{{ primary_host }}"
-
-  win_shell: "{{ selected_action.command }}"
-
-  ignore_errors: true
-
-  when: action_allowed
-
-
-# ----------------------------
-
-# EXECUTE SECONDARY ACTION
-
-# ----------------------------
-
-
-- name: Execute secondary action
-
-  delegate_to: "{{ secondary_host }}"
-
-  win_shell: "{{ selected_action.command }}"
-
-  ignore_errors: true
-
-  when:
-
-    - action_allowed
-
-    - secondary_host is defined
-
-    - step.phase in ['lateral_movement', 'command_and_control']
-
-    - can_lateral | default(true)
-
-
-# ----------------------------
-
-# ADD NEW COMPROMISED HOST
-
-# ----------------------------
-
-
-- name: Add new compromised host
-
-  set_fact:
+- set_fact:
 
     compromised_hosts: "{{ compromised_hosts + [secondary_host] }}"
 
-  when:
-
-    - action_allowed
-
-    - secondary_host is defined
-
-    - step.phase == "lateral_movement"
-
-    - can_lateral | default(true)
+  when: secondary_host is defined
 
 
 # ----------------------------
 
-# LOGGING
+# OUTPUT
 
 # ----------------------------
 
 
-- name: Log primary execution
+- debug:
 
-  include_role:
+    msg: >
 
-    name: report
+      EXECUTE {{ selected_action.name }}
 
-  vars:
+      ({{ selected_action.technique }})
 
-    action: "{{ selected_action.name }}"
+      → {{ primary_host }}
 
-    technique: "{{ selected_action.technique }}"
-
-    mitre_phase: "{{ step.phase }}"
-
-    host: "{{ primary_host }}"
-
-    privilege: "{{ current_privilege }}"
+      | phase={{ current_phase }}
 
 
-- name: Log secondary execution
+- debug:
 
-  include_role:
+    msg: >
 
-    name: report
+      HUNT: {{ selected_action.hunt.description | default('generic') }}
 
-  vars:
 
-    action: "{{ selected_action.name }}_secondary"
+- debug:
 
-    technique: "{{ selected_action.technique }}"
+    msg: >
 
-    mitre_phase: "{{ step.phase }}"
+      KQL: {{ selected_action.hunt.kql | default('N/A') }}
 
-    host: "{{ secondary_host }}"
 
-    privilege: "{{ current_privilege }}"
+# ----------------------------
+
+# JSON LOG ✅
+
+# ----------------------------
+
+
+- name: Append attack log
+
+  lineinfile:
+
+    path: "/tmp/attack_log.json"
+
+    create: yes
+
+    line: >
+
+      {{ {
+
+        "time": ansible_date_time.iso8601,
+
+        "host": primary_host,
+
+        "phase": current_phase,
+
+        "technique": selected_action.technique,
+
+        "name": selected_action.name
+
+      } | to_json }}
+
+
+# ----------------------------
+
+
+- name: Apply dwell delay
+
+  pause:
+
+    seconds: "{{ step.delay | default(1) }}"
 
   when:
 
-    - secondary_host is defined
+    - attack_mode == "temporal"
 
-    - step.phase in ['lateral_movement', 'command_and_control']
+    - step.delay is defined
+
+
+# ----------------------------
+
+# STATE
+
+# ----------------------------
+
+
+- set_fact:
+
+    current_phase: "{{ step.phase }}"
+
+    compromised_hosts: "{{ compromised_hosts | default(groups['windows'] | default(['wks01'])) }}"
+
+    used_techniques: "{{ used_techniques | default([]) }}"
+
+
+# ----------------------------
+

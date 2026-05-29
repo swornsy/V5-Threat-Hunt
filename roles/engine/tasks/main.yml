@@ -1,96 +1,353 @@
-# ----------------------------
-
-# GENERATE CAMPAIGN ID
 
 # ----------------------------
 
+# VALIDATE DATA
 
-- name: Generate campaign ID
+# ----------------------------
+
+
+
+- name: Ensure attack_matrix exists
+
+  fail:
+
+    msg: "attack_matrix NOT loaded"
+
+  when: attack_matrix is not defined
+
+
+
+- name: Ensure apt_catalog exists
+
+  fail:
+
+    msg: "apt_catalog NOT loaded"
+
+  when: apt_catalog is not defined
+
+
+
+# ----------------------------
+
+# COUNTRY SELECTION
+
+# ----------------------------
+
+
+
+- name: Build country list
 
   set_fact:
 
-    campaign_id: "{{ lookup('password', '/dev/null chars=ascii_letters length=8') }}"
+    countries: >-
 
-  run_once: true
+      {{
 
+        apt_catalog
 
-# ----------------------------
+        | dict2items
 
-# SELECT INITIAL FOOTHOLD
+        | map(attribute='value.country')
 
-# ----------------------------
+        | select('defined')
 
+        | unique
 
-- name: Select initial foothold host
+        | list
 
-  set_fact:
-
-    compromised_host: "{{ groups['workstations'] | random }}"
-
-  run_once: true
+      }}
 
 
-# ----------------------------
 
-# INITIALISE STATE
-
-# ----------------------------
-
-
-- name: Initialise compromised hosts
+- name: Select country
 
   set_fact:
 
-    compromised_hosts: ["{{ compromised_host }}"]
-
-  run_once: true
+    selected_country: "{{ countries | random }}"
 
 
-- name: Initialise identities (start low privilege)
+
+# ----------------------------
+
+# FILTER ACTORS
+
+# ----------------------------
+
+
+
+- name: Filter actors by country
 
   set_fact:
 
-    compromised_identities:
+    filtered_actors: >-
 
-      - name: "initial_user"
+      {{
 
-        privilege: "user"
+        apt_catalog
 
-  run_once: true
+        | dict2items
+
+        | selectattr('value.country', 'equalto', selected_country)
+
+        | list
+
+      }}
+
+
+
+- name: Validate actors exist
+
+  fail:
+
+    msg: "No actors for {{ selected_country }}"
+
+  when: filtered_actors | length == 0
+
 
 
 # ----------------------------
 
-# SET EXECUTION CHAIN
+# SELECT ACTOR
 
 # ----------------------------
 
 
-- name: Set execution chain
+
+- name: Select actor
 
   set_fact:
 
-    chain_to_run: "{{ attack_chain }}"
+    selected_actor_obj: "{{ filtered_actors | random }}"
 
-  run_once: true
+
+
+- name: Extract actor data
+
+  set_fact:
+
+    apt_info: "{{ selected_actor_obj.value }}"
+
+    selected_actor_id: "{{ selected_actor_obj.value.id }}"
+
 
 
 # ----------------------------
 
-# RUN ATTACK CHAIN
+# DISPLAY
 
 # ----------------------------
 
 
-- name: Run MITRE attack chain
+
+- name: Show selection
+
+  debug:
+
+    msg:
+
+      - "Country: {{ apt_info.country }}"
+
+      - "Actor: {{ apt_info.name }}"
+
+
+
+# ----------------------------
+
+# LOAD ACTOR DATA
+
+# ----------------------------
+
+
+
+- name: Set actor data
+
+  set_fact:
+
+    actor_data: "{{ attack_matrix[selected_actor_id] | default({}) }}"
+
+
+
+- name: Validate actor data
+
+  fail:
+
+    msg: "Actor has no attack data"
+
+  when: actor_data | length == 0
+
+
+
+# ----------------------------
+
+# RESET LOG
+
+# ----------------------------
+
+
+
+- name: Reset attack log
+
+  file:
+
+    path: /tmp/attack_log.json
+
+    state: absent
+
+
+
+# ----------------------------
+
+# BASELINE ACTIVITY
+
+# ----------------------------
+
+
+
+- name: Start normal activity
+
+  include_role:
+
+    name: normal_activity
+
+
+
+# ----------------------------
+
+# TIMING
+
+# ----------------------------
+
+
+
+- name: Set attack start %
+
+  set_fact:
+
+    attack_start_pct: "{{ (range(10, 91) | random) | int }}"
+
+
+
+- name: Set total seconds
+
+  set_fact:
+
+    total_seconds: "{{ (attack_duration | int) * 60 }}"
+
+
+
+- name: Debug fast start
+
+  set_fact:
+
+    attack_delay: 5
+
+
+
+- name: Show timing
+
+  debug:
+
+    msg: "Attack starts in {{ attack_delay }} seconds"
+
+
+
+# ----------------------------
+
+# WAIT
+
+# ----------------------------
+
+
+
+- name: Wait before attack
+
+  pause:
+
+    seconds: "{{ attack_delay }}"
+
+
+
+# ----------------------------
+
+# GENERATE SEQUENCE
+
+# ----------------------------
+
+
+
+- name: Generate attack sequence
+
+  command: python3 scripts/attack_sequencer.py
+
+  environment:
+
+    ACTOR_DATA: "{{ actor_data | to_json }}"
+
+    MODE: "{{ attack_behaviour }}"
+
+    DURATION: "{{ attack_duration }}"
+
+  register: sequence_output
+
+
+
+# ----------------------------
+
+# PARSE SEQUENCE
+
+# ----------------------------
+
+
+
+- name: Parse sequence
+
+  set_fact:
+
+    attack_sequence: "{{ sequence_output.stdout | from_json }}"
+
+
+
+- name: Validate sequence
+
+  fail:
+
+    msg: "Sequence empty"
+
+  when: attack_sequence | length == 0
+
+
+
+# ----------------------------
+
+# EXECUTE
+
+# ----------------------------
+
+
+
+- name: Execute attack
 
   include_tasks: run_phase.yml
 
-  loop: "{{ chain_to_run }}"
+  loop: "{{ attack_sequence }}"
 
   loop_control:
 
     loop_var: step
 
-  run_once: true
+
+
+# ----------------------------
+
+# COMPLETE
+
+# ----------------------------
+
+
+
+- name: Simulation complete
+
+  debug:
+
+    msg: "✅ Simulation complete"
 

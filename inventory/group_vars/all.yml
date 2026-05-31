@@ -1,0 +1,7 @@
+---
+# ========================================================================
+# GLOBAL CYBER RANGE VARIABLE LAYOUT (inventory/group_vars/all.yml)
+# ========================================================================
+
+# Core range configuration parameters can be added here as needed.
+# Dynamic state maps (compromised_hosts) are now managed exclusively in memory.

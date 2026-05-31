@@ -1,3 +1,31 @@
+---
+# ========================================================================
+# CYBER RANGE SIMULATION ENGINE - TECHNIQUE EXECUTION STEP
+# ========================================================================
+
+- name: "SIMULATION STEP: {{ selected_action.name | default('Unknown Action') }} ({{ selected_action.technique | default('T0000') }})"
+  ansible.builtin.debug:
+    msg: 
+      - "--------------------------------------------------------"
+      - "TARGET HOST : {{ inventory_hostname }}"
+      - "PHASE       : {{ selected_action.phase }}"
+      - "TECHNIQUE   : {{ selected_action.technique }}"
+      - "ACTION NAME : {{ selected_action.name }}"
+      - "PACING DELAY: {{ selected_action.delay | default(0) }}s"
+      - "--------------------------------------------------------"
+
+- name: Apply Pacing Timing Delay Buffer
+  ansible.builtin.wait_for:
+    timeout: "{{ (selected_action.delay | default(0) | int) if attack_behaviour != 'noisy' else 2 }}"
+  delegate_to: localhost
+  when: selected_action.delay is defined
+
+- name: Simulate Forensic Artifact Traces on Target Node
+  ansible.builtin.win_shell: |
+    Write-Output "Executing simulation trace for {{ selected_action.name }} [{{ selected_action.technique }}]"
+    cmd.exe /c "echo V5_SIMULATION_TRACE: {{ selected_action.technique }}"
+  ignore_errors: yes
+  
 - name: Append Forensic JSON Event Objects for SIEM Pipeline Simulation
   ansible.builtin.lineinfile:
     path: /tmp/attack_log.json

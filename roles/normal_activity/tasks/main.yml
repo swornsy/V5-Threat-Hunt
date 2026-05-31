@@ -1,19 +1,36 @@
-- name: Normal activity - user
+---
+# roles/normal_activity/tasks/main.yml
 
-  debug:
+# ------------------------------------------------------------------------
+# BENIGN BACKGROUND TELEMETRY SIMULATION (ENCODING-HARDENED)
+# ------------------------------------------------------------------------
+- name: Generate benign user background activity
+  ansible.windows.win_shell: |
+    [Console]::OutputEncoding = [System.Text.Encoding]::ASCII
+    ipconfig /all | Out-String
+    arp -a | Out-String
+    Get-ChildItem -Path "$env:USERPROFILE\Documents" -Filter "*.docx" -ErrorAction SilentlyContinue | Out-String
+    If (Test-Path "$env:WINDIR\win.ini") { Get-Content "$env:WINDIR\win.ini" -Head 5 | Out-String }
+  changed_when: false
+  ignore_errors: true
 
-    msg: "[NORMAL] User activity"
+- name: Generate standard administrative background noise
+  ansible.windows.win_shell: |
+    [Console]::OutputEncoding = [System.Text.Encoding]::ASCII
+    Get-Service | Where-Object { $_.Status -eq 'Running' } | Select-Object -First 10 | Out-String
+    Get-HotFix | Select-Object -Last 3 | Out-String
+    Get-CimInstance Win32_OperatingSystem | Select-Object LastBootUpTime | Out-String
+  changed_when: false
+  ignore_errors: true
 
-
-- name: Normal activity - admin
-
-  debug:
-
-    msg: "[NORMAL] Admin tasks"
-
-
-- name: Normal activity - DNS
-
-  debug:
-
-    msg: "[NORMAL] DNS queries"
+- name: Generate standard DNS and network traffic noise
+  ansible.windows.win_shell: |
+    [Console]::OutputEncoding = [System.Text.Encoding]::ASCII
+    $SafeDomains = @("microsoft.com", "windowsupdate.com", "github.com", "google.com")
+    ForEach ($Domain in $SafeDomains) {
+        [System.Net.Dns]::GetHostAddresses($Domain) | Out-Null
+        Start-Sleep -Seconds (Get-Random -Min 1 -Max 3)
+    }
+    Invoke-WebRequest -Uri "https://www.microsoft.com" -UseBasicParsing -TimeoutSec 5 -ErrorAction SilentlyContinue | Out-Null
+  changed_when: false
+  ignore_errors: true

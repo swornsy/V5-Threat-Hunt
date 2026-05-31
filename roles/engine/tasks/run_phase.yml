@@ -1,191 +1,47 @@
-# ----------------------------
+---
+# ========================================================================
+# CYBER RANGE SIMULATION ENGINE - PER-HOST LIFECYCLE (run_phase.yml)
+# ========================================================================
 
-# DELAYAL)# DELAY
+- name: Assess Infection Perimeter Control Mapping
+  ansible.builtin.set_fact:
+    is_compromised: "{{ inventory_hostname in (hostvars['localhost']['compromised_hosts'] | default([]) | list) }}"
 
-# ----------------------------
+# ------------------------------------------------------------------------
+# TECHNIQUE EXECUTION (Host executes actions matching its local state)
+# ------------------------------------------------------------------------
+- name: Process and Execute Targeted Cyber Range Vectors
+  include_tasks: execute_technique.yml
+  vars:
+    selected_action: "{{ item }}"
+  loop: "{{ attack_sequence | default([]) }}"
+  when: 
+    - is_compromised | bool
+    - item.technique not in (used_techniques | default([]))
 
-
-- set_fact:
-
-    selected_action: "{{ step }}"
-
-  when: attack_mode == "temporal"
-
-
-# ----------------------------
-
-# ACTION (SCORING)
-
-# ----------------------------
-
-
-- block:
-
-
-    - set_fact:
-
-        candidates: "{{ actor_data[current_phase] | default([]) }}"
-
-
-    - set_fact:
-
-        candidates: "{{ candidates | rejectattr('technique','in',used_techniques) | list }}"
-
-
-    - set_fact:
-
-        candidates: "{{ candidates if candidates else actor_data[current_phase] }}"
-
-
-    - set_fact:
-
-        selected_action: "{{ (candidates | sort(attribute='score.stealth'))[0] }}"
-
-      when: candidates | length > 0
-
-
-  when: attack_mode != "temporal"
-
-
-# ----------------------------
-
-# TRACK TECHNIQUES
-
-# ----------------------------
-
-
-- set_fact:
-
-    used_techniques: "{{ used_techniques + [selected_action.technique] }}"
-
-
-# ----------------------------
-
-# MULTI-HOST MODEL ✅
-
-# ----------------------------
-
-
-- set_fact:
-
-    primary_host: "{{ compromised_hosts | random }}"
-
-
-- set_fact:
-
-    secondary_host: "{{ (groups['windows'] | difference(compromised_hosts)) | random }}"
-
+# ------------------------------------------------------------------------
+# DYNAMIC BOUNDED LATERAL MOVEMENT: Pivot to 1-2 random uncompromised hosts
+# ------------------------------------------------------------------------
+- name: Register Pivoted Assets into Global Infection Tracking Group
+  ansible.builtin.set_fact:
+    compromised_hosts: >-
+      {{ 
+        (hostvars['localhost']['compromised_hosts'] | default([]) | list) + 
+        (groups['windows'] | difference(hostvars['localhost']['compromised_hosts'] | default([]) | list) | shuffle)[:2] | list
+      }}
+  delegate_to: localhost
+  delegate_facts: true
+  run_once: true
+  vars:
+    has_lateral_item: "{{ attack_sequence | map(attribute='phase') | list | intersect(['lateral_movement']) | length > 0 }}"
   when:
+    - is_compromised | bool
+    - has_lateral_item | bool
 
-    - current_phase == "lateral_movement"
-
-    - (groups['windows'] | difference(compromised_hosts)) | length > 0
-
-
-- set_fact:
-
-    compromised_hosts: "{{ compromised_hosts + [secondary_host] }}"
-
-  when: secondary_host is defined
-
-
-# ----------------------------
-
-# OUTPUT
-
-# ----------------------------
-
-
-- debug:
-
-    msg: >
-
-      EXECUTE {{ selected_action.name }}
-
-      ({{ selected_action.technique }})
-
-      → {{ primary_host }}
-
-      | phase={{ current_phase }}
-
-
-- debug:
-
-    msg: >
-
-      HUNT: {{ selected_action.hunt.description | default('generic') }}
-
-
-- debug:
-
-    msg: >
-
-      KQL: {{ selected_action.hunt.kql | default('N/A') }}
-
-
-# ----------------------------
-
-# JSON LOG ✅
-
-# ----------------------------
-
-
-- name: Append attack log
-
-  lineinfile:
-
-    path: "/tmp/attack_log.json"
-
-    create: yes
-
-    line: >
-
-      {{ {
-
-        "time": ansible_date_time.iso8601,
-
-        "host": primary_host,
-
-        "phase": current_phase,
-
-        "technique": selected_action.technique,
-
-        "name": selected_action.name
-
-      } | to_json }}
-
-
-# ----------------------------
-
-
-- name: Apply dwell delay
-
-  pause:
-
-    seconds: "{{ step.delay | default(1) }}"
-
-  when:
-
-    - attack_mode == "temporal"
-
-    - step.delay is defined
-
-
-# ----------------------------
-
-# STATE
-
-# ----------------------------
-
-
-- set_fact:
-
-    current_phase: "{{ step.phase }}"
-
-    compromised_hosts: "{{ compromised_hosts | default(groups['windows'] | default(['wks01'])) }}"
-
-    used_techniques: "{{ used_techniques | default([]) }}"
-
-
-# ----------------------------
-
+# ------------------------------------------------------------------------
+# LOCAL TRACKING: Mark all run techniques as spent for this specific host
+# ------------------------------------------------------------------------
+- name: Update Host Local Blacklist Cache Arrays
+  ansible.builtin.set_fact:
+    used_techniques: "{{ used_techniques | default([]) + (attack_sequence | map(attribute='technique') | list) }}"
+  when: is_compromised | bool

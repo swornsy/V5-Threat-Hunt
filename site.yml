@@ -1,71 +1,29 @@
 ---
-# ========================================================================
-# MASTER CYBER RANGE ATTACK SIMULATION PLAYBOOK (site.yml)
-# ========================================================================
-- name: Master Cyber Range Attack Simulation Playbook
-  hosts: windows
-  gather_facts: true
+- name: V5 Threat Hunt Adversary Emulation Sequencer
+  hosts: localhost
+  gather_facts: no
 
-  vars_files:
-    - vars/mitre_attack_matrix.yml
-    - vars/apt_catalog.yml
+  vars:
+    selected_actor_id: "G0016"
+    attack_sequence: []
 
   pre_tasks:
-    - name: Dynamically Resolve Patient Zero Entry Target
-      ansible.builtin.set_fact:
-        resolved_initial_target: "{{ initial_target | default(groups['windows'] | random) }}"
-      run_once: true
+    - name: Load attack matrix
+      include_vars:
+        file: attack_matrix.yml
 
-    - name: Initialize Controller Central Infection Tracking Registry with Dynamic Patient Zero
-      ansible.builtin.set_fact:
-        compromised_hosts: ["{{ resolved_initial_target }}"]
-      delegate_to: localhost
-      delegate_facts: true
-      run_once: true
+    - name: Build attack sequence
+      include_tasks: build_attack_sequence.yml
 
-    - name: Notify Operator of Selected Patient Zero Node
-      ansible.builtin.debug:
-        msg: "[!] DYNAMIC SIMULATION STARTING POINT RESOLVED: -> [ {{ resolved_initial_target }} ]"
-      run_once: true
+    - name: Show selected actor and attack plan
+      debug:
+        msg:
+          - "Selected actor: {{ selected_actor_id }}"
+          - "Planned steps: {{ attack_sequence | length }}"
 
-    - name: Hydrate local runtime sequence and matrix properties
-      ansible.builtin.set_fact:
-        used_techniques: []
-        current_phase: "initial_access"
-        local_actor_id: "{{ selected_actor_id }}"
-        local_actor_matrix: "{{ attack_matrix[selected_actor_id] | default({}) }}"
-
-    - name: Verify targeted threat intelligence footprint exists
-      ansible.builtin.fail:
-        msg: "The Actor ID [{{ local_actor_id }}] was not found inside mitre_attack_matrix.yml"
-      when: local_actor_matrix | length == 0
-
-    - name: Run Chronological Jitter Sequence Script Pacing Engine
-      ansible.builtin.command: "python3 scripts/attack_sequencer.py"
-      environment:
-        ACTOR_DATA: "{{ local_actor_matrix | to_json }}"
-        MODE: "{{ attack_behaviour | default('mixed') }}"
-        DURATION: "{{ attack_duration | default('60') }}"
-      register: local_sequence_output
-      when: attack_mode == "temporal"
-      delegate_to: localhost
-
-    - name: Commit Parsed Chronological Steps to Active Memory Trace Arrays
-      ansible.builtin.set_fact:
-        attack_sequence: "{{ local_sequence_output.stdout | regex_replace('[^\\x00-\\x7F]+', '') | from_json }}"
-      when: attack_mode == "temporal"
-
-    - name: Commit Fallback Structure maps if utilizing non-temporal modes
-      ansible.builtin.set_fact:
-        attack_sequence: "{{ local_actor_matrix.values() | flatten }}"
-      when: attack_mode != "temporal"
-
-    - name: Map consolidated threat attributes to system variables
-      ansible.builtin.set_fact:
-        actor_data: "{{ local_actor_matrix }}"
-        selected_actor_id: "{{ local_actor_id }}"
-
-  roles:
-    - role: users
-    - role: normal_activity
-    - role: engine
+  tasks:
+    - name: Process simulation chain
+      include_tasks: run_atomic_step.yml
+      loop: "{{ attack_sequence }}"
+      loop_control:
+        loop_var: attack_step

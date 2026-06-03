@@ -4,17 +4,38 @@
   gather_facts: yes
 
   pre_tasks:
-    - name: Dynamically Load Selected Threat Actor Datasets
+    - name: Dynamically Ingest Raw Threat Actor Matrix Configurations
       ansible.builtin.include_vars:
-        file: "../vars/chains/{{ hostvars['localhost']['selected_actor_id'] | lower }}_chain.yml"
+        file: "vars/mitre_attack_matrix.yml"
+        name: raw_matrix
       delegate_to: localhost
       run_once: true
 
-    - name: Initialize Global Infection Tracking with Patient Zero
+    - name: Flatten and Construct Target Attack Sequence Cache Arrays
+      ansible.builtin.set_fact:
+        attack_sequence: >-
+          {% set target_actor = hostvars['localhost']['selected_actor_id'] | default('G0016') %}
+          {% set actor_data = raw_matrix['attack_matrix'][target_actor] | default({}) %}
+          {% set processed_list = [] %}
+          {% for phase_name, actions in actor_data.items() %}
+            {% for action in actions %}
+              {% set _ = action.update({'phase': phase_name}) %}
+              {% set _ = processed_list.append(action) %}
+            {% endfor %}
+          {% endfor %}
+          {{ processed_list }}
+      delegate_to: localhost
+      run_once: true
+
+    - name: Distribute Processed Attack Sequences and Initialize Blacklists
+      ansible.builtin.set_fact:
+        attack_sequence: "{{ hostvars['localhost']['attack_sequence'] }}"
+        used_techniques: []
+
+    - name: Establish Patient Zero Control Foothold Points
       ansible.builtin.set_fact:
         compromised_hosts:
-          # Automatically seeds the first workstation (e.g., off-wks01) as the initial foothold
-          - "{{ groups['windows'] | select('search', 'wks01') | first | default(groups['windows'][0]) }}"
+          - "{{ groups['windows'] | select('search', 'wks01') | first | default(groups['windows']) }}"
       delegate_to: localhost
       delegate_facts: true
       run_once: true

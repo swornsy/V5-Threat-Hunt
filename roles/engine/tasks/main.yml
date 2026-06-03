@@ -6,9 +6,14 @@
 - name: Execute Cyber Range Campaign Across MITRE ATT&CK Phases
   include_tasks: run_phase.yml
   loop:
+    - resource_development
     - initial_access
     - execution
     - persistence
+    - privilege_escalation
+    - defense_evasion
+    - credential_access
+    - discovery
     - lateral_movement
     - c2
     - exfiltration

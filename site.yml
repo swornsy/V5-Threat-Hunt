@@ -1,29 +1,26 @@
 ---
-- name: V5 Threat Hunt Adversary Emulation Sequencer
-  hosts: localhost
-  gather_facts: no
-
-  vars:
-    selected_actor_id: "G0016"
-    attack_sequence: []
+- name: V5 Threat Hunt Adversary Emulation Engine
+  hosts: windows
+  gather_facts: yes
 
   pre_tasks:
-    - name: Load attack matrix
-      include_vars:
-        file: attack_matrix.yml
+    - name: Dynamically Load Selected Threat Actor Datasets
+      ansible.builtin.include_vars:
+        file: "../vars/chains/{{ hostvars['localhost']['selected_actor_id'] | lower }}_chain.yml"
+      delegate_to: localhost
+      run_once: true
 
-    - name: Build attack sequence
-      include_tasks: build_attack_sequence.yml
+    - name: Initialize Global Infection Tracking with Patient Zero
+      ansible.builtin.set_fact:
+        compromised_hosts:
+          # Automatically seeds the first workstation (e.g., off-wks01) as the initial foothold
+          - "{{ groups['windows'] | select('search', 'wks01') | first | default(groups['windows'][0]) }}"
+      delegate_to: localhost
+      delegate_facts: true
+      run_once: true
+      when: hostvars['localhost']['compromised_hosts'] is not defined
 
-    - name: Show selected actor and attack plan
-      debug:
-        msg:
-          - "Selected actor: {{ selected_actor_id }}"
-          - "Planned steps: {{ attack_sequence | length }}"
-
-  tasks:
-    - name: Process simulation chain
-      include_tasks: run_atomic_step.yml
-      loop: "{{ attack_sequence }}"
-      loop_control:
-        loop_var: attack_step
+  roles:
+    - users
+    - normal_activity
+    - engine

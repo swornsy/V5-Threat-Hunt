@@ -14,7 +14,8 @@
   include_tasks: execute_technique.yml
   vars:
     selected_action: "{{ item }}"
-  loop: "{{ attack_sequence | default([]) }}"
+  # Filters the global actor sequence to only run actions matching the current phase loop
+  loop: "{{ attack_sequence | default([]) | selectattr('phase', 'equalto', master_loop_phase) | list }}"
   when: 
     - is_compromised | bool
     - item.technique not in (used_techniques | default([]))
@@ -33,8 +34,10 @@
   delegate_facts: true
   run_once: true
   vars:
-    has_lateral_item: "{{ attack_sequence | map(attribute='phase') | list | intersect(['lateral_movement']) | length > 0 }}"
+    # Verifies if the threat actor actually has actionable items for this specific phase
+    has_lateral_item: "{{ attack_sequence | default([]) | selectattr('phase', 'equalto', master_loop_phase) | list | length > 0 }}"
   when:
+    - master_loop_phase == 'lateral_movement'
     - is_compromised | bool
     - has_lateral_item | bool
 
@@ -43,5 +46,5 @@
 # ------------------------------------------------------------------------
 - name: Update Host Local Blacklist Cache Arrays
   ansible.builtin.set_fact:
-    used_techniques: "{{ used_techniques | default([]) + (attack_sequence | map(attribute='technique') | list) }}"
+    used_techniques: "{{ used_techniques | default([]) + (attack_sequence | default([]) | selectattr('phase', 'equalto', master_loop_phase) | map(attribute='technique') | list) }}"
   when: is_compromised | bool

@@ -8,33 +8,31 @@
     is_compromised: "{{ inventory_hostname in (hostvars['localhost']['compromised_hosts'] | default([]) | list) }}"
 
 # ------------------------------------------------------------------------
-# TECHNIQUE EXECUTION (Host executes actions matching its local state)
+# TECHNIQUE EXECUTION (Filters the clean, flattened pre-task sequence)
 # ------------------------------------------------------------------------
 - name: Process and Execute Targeted Cyber Range Vectors
   include_tasks: execute_technique.yml
   vars:
     selected_action: "{{ item }}"
-  # Filters the global actor sequence to only run actions matching the current phase loop
   loop: "{{ attack_sequence | default([]) | selectattr('phase', 'equalto', master_loop_phase) | list }}"
   when: 
     - is_compromised | bool
     - item.technique not in (used_techniques | default([]))
 
 # ------------------------------------------------------------------------
-# DYNAMIC BOUNDED LATERAL MOVEMENT: Pivot to 1-2 random uncompromised hosts
+# DYNAMIC BOUNDED LATERAL MOVEMENT: Pivot to uncompromised assets
 # ------------------------------------------------------------------------
 - name: Register Pivoted Assets into Global Infection Tracking Group
   ansible.builtin.set_fact:
     compromised_hosts: >-
       {{ 
         (hostvars['localhost']['compromised_hosts'] | default([]) | list) + 
-        (groups['windows'] | difference(hostvars['localhost']['compromised_hosts'] | default([]) | list) | shuffle)[:2] | list
+        (groups['windows'] | difference(hostvars['localhost']['compromised_hosts'] | default([]) | list) | shuffle)[:1] | list
       }}
   delegate_to: localhost
   delegate_facts: true
   run_once: true
   vars:
-    # Verifies if the threat actor actually has actionable items for this specific phase
     has_lateral_item: "{{ attack_sequence | default([]) | selectattr('phase', 'equalto', master_loop_phase) | list | length > 0 }}"
   when:
     - master_loop_phase == 'lateral_movement'
@@ -42,7 +40,7 @@
     - has_lateral_item | bool
 
 # ------------------------------------------------------------------------
-# LOCAL TRACKING: Mark all run techniques as spent for this specific host
+# LOCAL TRACKING: Update tracking array to keep host state clean
 # ------------------------------------------------------------------------
 - name: Update Host Local Blacklist Cache Arrays
   ansible.builtin.set_fact:

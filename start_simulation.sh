@@ -29,7 +29,7 @@ try:
     catalog_root = data.get('apt_catalog', {})
     countries = list(catalog_root.keys())
     print(','.join(countries))
-except Exception as e:
+except Exception:
     sys.exit(1)
 ")
 
@@ -47,8 +47,11 @@ done
 echo "------------------------------------------------------------------------"
 read -p "Choose a region (1-${#countries[@]}): " country_choice
 
-if ! [[ "$country_choice" =~ ^[0-9]+$ ]] || [ "$country_choice" -le 0 ] || [ "$country_choice" -gt "${#countries[@]}" ]; then
-    selected_country="${countries}"
+if ! [[ "$country_choice" =~ ^[0-9]+$ ]] || \
+   [ "$country_choice" -le 0 ] || \
+   [ "$country_choice" -gt "${#countries[@]}" ]; then
+    echo "[WARN] Invalid selection, defaulting to: ${countries[0]}"
+    selected_country="${countries[0]}"
 else
     selected_country="${countries[$((country_choice-1))]}"
 fi
@@ -64,10 +67,8 @@ mapfile -t actors < <(python3 -c "
 import yaml
 with open('$CATALOG', 'r') as f:
     data = yaml.load(f, Loader=yaml.SafeLoader)
-
 catalog_root = data.get('apt_catalog', {})
 actors_list = catalog_root.get('$selected_country', [])
-
 for actor in actors_list:
     if isinstance(actor, dict):
         name = actor.get('name', 'Unknown')
@@ -76,7 +77,7 @@ for actor in actors_list:
 ")
 
 if [ ${#actors[@]} -eq 0 ]; then
-    if [ "$selected_country" == "China" ]; then
+    if [ "$selected_country" = "China" ]; then
         actors=("admin@338|G0018" "Aoqin Dragon|G1007" "APT1|G0006")
     else
         actors=("Default Actor|G0000")
@@ -92,8 +93,11 @@ done
 echo "------------------------------------------------------------------------"
 read -p "Select threat profile to emulate (1-${#actors[@]}): " actor_choice
 
-if ! [[ "$actor_choice" =~ ^[0-9]+$ ]] || [ "$actor_choice" -le 0 ] || [ "$actor_choice" -gt "${#actors[@]}" ]; then
-    target_actor="${actors}"
+if ! [[ "$actor_choice" =~ ^[0-9]+$ ]] || \
+   [ "$actor_choice" -le 0 ] || \
+   [ "$actor_choice" -gt "${#actors[@]}" ]; then
+    echo "[WARN] Invalid selection, defaulting to: ${actors[0]}"
+    target_actor="${actors[0]}"
 else
     target_actor="${actors[$((actor_choice-1))]}"
 fi
@@ -156,11 +160,9 @@ rm -f runtime_vars.yml
 echo "[*] Handing configuration targets off to Ansible Automation Engine..."
 echo ""
 
-ansible-playbook -i inventory/hosts.ini site.yml -e "
-selected_actor_name='${actor_name}' \
-selected_actor_id='${actor_id}' \
-attack_mode='${attack_mode}' \
-attack_behaviour='${attack_behaviour}' \
-attack_duration='60'
-"
-EOF
+ansible-playbook -i inventory/hosts.ini site.yml -e \
+  "selected_actor_name='${actor_name}' \
+   selected_actor_id='${actor_id}' \
+   attack_mode='${attack_mode}' \
+   attack_behaviour='${attack_behaviour}' \
+   attack_duration='60'"

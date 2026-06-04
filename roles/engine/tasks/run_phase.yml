@@ -1,48 +1,78 @@
 ---
-# ========================================================================
-# CYBER RANGE SIMULATION ENGINE - PER-HOST LIFECYCLE (run_phase.yml)
-# ========================================================================
 
-- name: Assess Infection Perimeter Control Mapping
-  ansible.builtin.set_fact:
-    is_compromised: "{{ inventory_hostname in (hostvars['localhost']['compromised_hosts'] | default([]) | list) }}"
+- name: Normalize phase
 
-# ------------------------------------------------------------------------
-# TECHNIQUE EXECUTION (Filters the clean, flattened pre-task sequence)
-# ------------------------------------------------------------------------
-- name: Process and Execute Targeted Cyber Range Vectors
+  set_fact:
+
+    normalized_phase: "{{ master_loop_phase | string | trim | lower }}"
+
+  tags: engine
+
+
+- name: DEBUG normalized phase
+
+  debug:
+
+    msg: "Phase={{ normalized_phase }} ({{ normalized_phase | type_debug }})"
+
+  tags: engine
+
+
+# ⚡ THE FIX: Dynamically evaluate if the current host is inside the compromised foothold map
+
+- name: Evaluate Host Foothold Compromise Status
+
+  set_fact:
+
+    is_compromised: "{{ inventory_hostname in (hostvars['localhost']['compromised_hosts'] | default([])) or (inventory_hostname | split('.') | first) in (hostvars['localhost']['compromised_hosts'] | default([])) }}"
+
+  tags: engine
+
+
+- name: Build phase-specific technique list
+
+  set_fact:
+
+    phase_techniques: "{{ attack_sequence | selectattr('phase', 'equalto', normalized_phase) | list }}"
+
+  tags: engine
+
+
+- name: DEBUG phase execution
+
+  debug:
+
+    msg: >
+
+      Phase={{ normalized_phase }}
+
+      Host={{ inventory_hostname }}
+
+      Is Compromised={{ is_compromised | bool }}
+
+      Technique Count={{ phase_techniques | length }}
+
+  tags: engine
+
+
+- name: Execute Cyber Range Techniques
+
   include_tasks: execute_technique.yml
-  vars:
-    selected_action: "{{ item }}"
-  loop: "{{ attack_sequence | default([]) | selectattr('phase', 'equalto', master_loop_phase) | list }}"
-  when: 
-    - is_compromised | bool
-    - item.technique not in (used_techniques | default([]))
 
-# ------------------------------------------------------------------------
-# DYNAMIC BOUNDED LATERAL MOVEMENT: Pivot to uncompromised assets
-# ------------------------------------------------------------------------
-- name: Register Pivoted Assets into Global Infection Tracking Group
-  ansible.builtin.set_fact:
-    compromised_hosts: >-
-      {{ 
-        (hostvars['localhost']['compromised_hosts'] | default([]) | list) + 
-        (groups['windows'] | difference(hostvars['localhost']['compromised_hosts'] | default([]) | list) | shuffle)[:1] | list
-      }}
-  delegate_to: localhost
-  delegate_facts: true
-  run_once: true
   vars:
-    has_lateral_item: "{{ attack_sequence | default([]) | selectattr('phase', 'equalto', master_loop_phase) | list | length > 0 }}"
+
+    selected_action: "{{ technique }}"
+
+  loop: "{{ phase_techniques }}"
+
+  loop_control:
+
+    loop_var: technique
+
   when:
-    - master_loop_phase == 'lateral_movement'
-    - is_compromised | bool
-    - has_lateral_item | bool
 
-# ------------------------------------------------------------------------
-# LOCAL TRACKING: Update tracking array to keep host state clean
-# ------------------------------------------------------------------------
-- name: Update Host Local Blacklist Cache Arrays
-  ansible.builtin.set_fact:
-    used_techniques: "{{ used_techniques | default([]) + (attack_sequence | default([]) | selectattr('phase', 'equalto', master_loop_phase) | map(attribute='technique') | list) }}"
-  when: is_compromised | bool
+    - phase_techniques | length > 0
+
+    - is_compromised | bool
+
+  tags: engine

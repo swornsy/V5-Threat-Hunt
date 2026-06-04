@@ -1,43 +1,65 @@
 ---
-# ========================================================================
-# CYBER RANGE SIMULATION ENGINE - TECHNIQUE EXECUTION STEP
-# ========================================================================
 
-- name: "SIMULATION STEP: {{ selected_action.name | default('Unknown Action') }} ({{ selected_action.technique | default('T0000') }})"
-  ansible.builtin.debug:
-    msg: 
-      - "--------------------------------------------------------"
-      - "TARGET HOST : {{ inventory_hostname }}"
-      - "PHASE       : {{ selected_action.phase }}"
-      - "TECHNIQUE   : {{ selected_action.technique }}"
-      - "ACTION NAME : {{ selected_action.name }}"
-      - "PACING DELAY: {{ selected_action.delay | default(5) }}s"
-      - "--------------------------------------------------------"
+- name: Validate selected action
 
-- name: Apply Pacing Timing Delay Buffer
-  ansible.builtin.wait_for:
-    timeout: "{{ (selected_action.delay | default(5) | int) if (attack_behaviour | default('mixed') != 'noisy') else 2 }}"
-  delegate_to: localhost
+  assert:
 
-- name: Simulate Forensic Artifact Traces on Target Node
-  ansible.windows.win_shell: |
-    [Console]::OutputEncoding = [System.Text.Encoding]::ASCII
-    Write-Output "Executing simulation trace for {{ selected_action.name }} [{{ selected_action.technique }}]"
-    cmd.exe /c "echo V5_SIMULATION_TRACE: {{ selected_action.technique }}"
-  ignore_errors: yes
-  
-- name: Append Forensic JSON Event Objects for SIEM Pipeline Simulation
-  ansible.builtin.lineinfile:
-    path: /tmp/attack_log.json
-    create: yes
-    mode: '0644'
-    line: >-
-      {{ {
-        "time": lookup('pipe', 'date -u +"%Y-%m-%dT%H:%M:%SZ"'),
-        "host": inventory_hostname,
-        "phase": selected_action.phase,
-        "technique": selected_action.technique,
-        "name": selected_action.name,
-        "status": "executed"
-      } | to_json }}
-  delegate_to: localhost
+    that:
+
+      - selected_action is mapping
+
+      - selected_action.technique is defined
+
+      - selected_action.phase is defined
+
+  tags: engine
+
+
+- name: DEBUG execution
+
+  debug:
+
+    msg: >
+
+      Executing {{ selected_action.name }}
+
+      ({{ selected_action.technique }})
+
+      Phase={{ selected_action.phase }}
+
+      Host={{ inventory_hostname }}
+
+  tags: engine
+
+
+- name: Simulate execution
+
+  win_shell: |
+
+    echo "[SIM] {{ selected_action.name }} ({{ selected_action.technique }})"
+
+    echo "Phase={{ selected_action.phase }}"
+
+    hostname
+
+  register: execution_result
+
+  tags: engine
+
+
+- name: DEBUG result
+
+  debug:
+
+    var: execution_result.stdout_lines
+
+  tags: engine
+
+
+- name: Track technique
+
+  set_fact:
+
+    used_techniques: "{{ (used_techniques | default([])) + [ selected_action.technique ] }}"
+
+  tags: engine

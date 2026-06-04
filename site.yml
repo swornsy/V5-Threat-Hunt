@@ -1,47 +1,233 @@
 ---
-- name: V5 Threat Hunt Adversary Emulation Engine
+
+- name: V5 Threat Hunt Adversary Emulation Engine (Testable Build)
+
   hosts: windows
+
   gather_facts: yes
 
+
+  vars:
+
+    # ✅ Default test switches
+
+    test_single_phase: false
+
+    test_phase_name: "execution"
+
+
+    test_single_technique: false
+
+    test_technique_id: "t1059.001"
+
+
   pre_tasks:
-    - name: Dynamically Ingest Raw Threat Actor Matrix Configurations
-      ansible.builtin.include_vars:
+
+    # ==========================================================
+
+    # ✅ SEED GLOBAL ORCHESTRATION PHASES VIA FACTS
+
+    # ==========================================================
+
+    - name: Initialize Global Cyber Range ATT&CK Phases
+
+      set_fact:
+
+        valid_phases:
+
+          - reconnaissance
+
+          - initial-access
+
+          - execution
+
+          - persistence
+
+          - privilege-escalation
+
+          - defense-evasion
+
+          - credential-access
+
+          - discovery
+
+          - lateral-movement
+
+          - collection
+
+          - command-and-control
+
+          - exfiltration
+
+          - impact
+
+      tags: always
+
+
+    # ==========================================================
+
+    # ✅ LOAD MATRIX (ALWAYS)
+
+    # ==========================================================
+
+    - name: Load attack matrix
+
+      include_vars:
+
         file: "vars/mitre_attack_matrix.yml"
+
         name: raw_matrix
+
       delegate_to: localhost
+
       run_once: true
 
-    - name: Flatten and Construct Target Attack Sequence Cache Arrays
-      ansible.builtin.set_fact:
+      tags: always
+
+
+    # ==========================================================
+
+    # ✅ DEBUG ACTOR SELECTION
+
+    # ==========================================================
+
+    - name: DEBUG actor selection
+
+      debug:
+
+        msg: "Using actor {{ selected_actor_id | default('G0016') }}"
+
+      run_once: true
+
+      tags: always
+
+
+    # ==========================================================
+
+    # ✅ PARSE, RE-CAST, AND FLATTEN CAMPAIGN MATRIX NATIVELY
+
+    # ==========================================================
+
+    - name: Parse and Flatten Target Attack Sequence Array
+
+      set_fact:
+
         attack_sequence: >-
-          {% set target_actor = hostvars['localhost']['selected_actor_id'] | default('G0016') %}
-          {% set actor_data = raw_matrix['attack_matrix'][target_actor] | default({}) %}
-          {% set processed_list = [] %}
-          {% for phase_name, actions in actor_data.items() %}
-            {% for action in actions %}
-              {% set _ = action.update({'phase': phase_name}) %}
-              {% set _ = processed_list.append(action) %}
-            {% endfor %}
-          {% endfor %}
-          {{ processed_list }}
-      delegate_to: localhost
-      run_once: true
 
-    - name: Distribute Processed Attack Sequences and Initialize Blacklists
-      ansible.builtin.set_fact:
-        attack_sequence: "{{ hostvars['localhost']['attack_sequence'] }}"
+          {% set target_actor = selected_actor_id | default('G0016') %}
+
+          {% set actor_data = raw_matrix['attack_matrix'][target_actor] | default({}) %}
+
+          {% set processed_list = [] %}
+
+          {% for phase_name, actions in actor_data.items() %}
+
+            {% if actions is iterable and actions is not string and actions is not mapping %}
+
+              {% for action in actions %}
+
+                {% if action is mapping and action.technique is defined %}
+
+                  {% set action_copy = action.copy() %}
+
+                  {% set _ = action_copy.update({'phase': phase_name | string}) %}
+
+                  {% set _ = processed_list.append(action_copy) %}
+
+                {% endif %}
+
+              {% endfor %}
+
+            {% endif %}
+
+          {% endfor %}
+
+          {{ processed_list }}
+
         used_techniques: []
 
-    - name: Establish Patient Zero Control Foothold Points
-      ansible.builtin.set_fact:
-        compromised_hosts:
-          - "{{ groups['windows'] | select('search', 'wks01') | first | default(groups['windows']) }}"
-      delegate_to: localhost
-      delegate_facts: true
+      tags: always
+
+
+    - name: Force Strict Structural Type Casting
+
+      set_fact:
+
+        attack_sequence: "{{ attack_sequence | from_yaml }}"
+
+        used_techniques: []
+
+      tags: always
+
+
+    # ==========================================================
+
+    # ✅ EVALUATE MANUAL TROUBLESHOOTING TEST SWITCHES
+
+    # ==========================================================
+
+    - name: Apply Troubleshooting Filters (Single Phase Test)
+
+      set_fact:
+
+        attack_sequence: "{{ attack_sequence | selectattr('phase', 'equalto', test_phase_name) | list }}"
+
+      when: test_single_phase | bool
+
+      tags: troubleshooting
+
+
+    - name: Apply Troubleshooting Filters (Single Technique Test)
+
+      set_fact:
+
+        attack_sequence: "{{ attack_sequence | selectattr('technique', 'equalto', test_technique_id | upper) | list }}"
+
+      when: test_single_technique | bool
+
+      tags: troubleshooting
+
+
+    - name: DEBUG Final Flattened Attack Sequence Output
+
+      debug:
+
+        var: attack_sequence
+
       run_once: true
+
+      tags: troubleshooting
+
+
+    # ==========================================================
+
+    # ✅ SEED FOOT-HOLD ATTRIBUTES
+
+    # ==========================================================
+
+    - name: Establish Patient Zero Control Foothold Points
+
+      set_fact:
+
+        compromised_hosts:
+
+          - "{{ groups['windows'] | select('search', 'wks01') | first | default(groups['windows']) }}"
+
+      delegate_to: localhost
+
+      delegate_facts: true
+
+      run_once: true
+
       when: hostvars['localhost']['compromised_hosts'] is not defined
 
+      tags: always
+
+
   roles:
+
     - users
+
     - normal_activity
+
     - engine

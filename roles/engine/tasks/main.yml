@@ -1,21 +1,13 @@
 ---
-# ========================================================================
-# CYBER RANGE ENGINE - MAIN ENTRYPOINT (roles/engine/tasks/main.yml)
-# ========================================================================
 
-- name: Execute Cyber Range Campaign Across MITRE ATT&CK Phases
+- name: Execute Cyber Range Campaign Across VALID ATT&CK Phases
+
   include_tasks: run_phase.yml
-  loop:
-    - resource_development
-    - initial_access
-    - execution
-    - persistence
-    - privilege_escalation
-    - defense_evasion
-    - credential_access
-    - discovery
-    - lateral_movement
-    - c2
-    - exfiltration
+
+  loop: "{{ valid_phases }}"
+
   loop_control:
+
     loop_var: master_loop_phase
+
+  tags: engine

@@ -12,6 +12,8 @@
 
       - selected_action.phase is defined
 
+  when: is_compromised | bool
+
   tags: engine
 
 
@@ -29,6 +31,8 @@
 
       Host={{ inventory_hostname }}
 
+  when: is_compromised | bool
+
   tags: engine
 
 
@@ -44,6 +48,8 @@
 
   register: execution_result
 
+  when: is_compromised | bool
+
   tags: engine
 
 
@@ -53,6 +59,31 @@
 
     var: execution_result.stdout_lines
 
+  when: 
+
+    - is_compromised | bool
+
+    - execution_result.stdout_lines is defined
+
+  tags: engine
+
+
+- name: Write attack log to local control box
+
+  delegate_to: localhost
+
+  run_once: false
+
+  lineinfile:
+
+    path: /tmp/adversary_report.txt
+
+    line: "{{ selected_actor_id | default('G0016') }} | {{ inventory_hostname }} | {{ ansible_date_time.iso8601 }} | {{ selected_action.phase }} | {{ selected_action.name }} | {{ selected_action.technique }}"
+
+    create: yes
+
+  when: is_compromised | bool
+
   tags: engine
 
 
@@ -61,5 +92,7 @@
   set_fact:
 
     used_techniques: "{{ (used_techniques | default([])) + [ selected_action.technique ] }}"
+
+  when: is_compromised | bool
 
   tags: engine

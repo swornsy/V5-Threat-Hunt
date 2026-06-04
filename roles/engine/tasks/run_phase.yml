@@ -9,17 +9,6 @@
   tags: engine
 
 
-- name: DEBUG normalized phase
-
-  debug:
-
-    msg: "Phase={{ normalized_phase }} ({{ normalized_phase | type_debug }})"
-
-  tags: engine
-
-
-# âš¡ THE FIX: Dynamically evaluate if the current host is inside the compromised foothold map
-
 - name: Evaluate Host Foothold Compromise Status
 
   set_fact:
@@ -29,16 +18,120 @@
   tags: engine
 
 
-- name: Build phase-specific technique list
+# 1. Gather all techniques the selected actor has for this phase
+
+- name: Extract Group-Specific Techniques for Current Phase
 
   set_fact:
 
-    phase_techniques: "{{ attack_sequence | selectattr('phase', 'equalto', normalized_phase) | list }}"
+    group_techniques: "{{ attack_sequence | selectattr('phase', 'equalto', normalized_phase) | list }}"
 
   tags: engine
 
 
-- name: DEBUG phase execution
+# 2. Determine if the actor has any prior activities before this phase
+
+- name: Calculate Prior Group Activity History
+
+  set_fact:
+
+    prior_group_techniques: "{{ attack_sequence | selectattr('phase', 'in', valid_phases[:valid_phases.index(normalized_phase)]) | list }}"
+
+  tags: engine
+
+
+# 3. Handle Fallback: If group has nothing, but has started, compile alternative pool
+
+- name: Compile Global Fallback Dataset for Phase if Missing
+
+  set_fact:
+
+    global_phase_fallback: >-
+
+      {% set target_actor = selected_actor_id | default('G0016') %}
+
+      {% set processed_list = [] %}
+
+      {% for actor, phases in raw_matrix['attack_matrix'].items() %}
+
+        {% if actor != target_actor %}
+
+          {% set actions = phases[normalized_phase] | default([]) %}
+
+          {% if actions is iterable and actions is not string and actions is not mapping %}
+
+            {% for action in actions %}
+
+              {% if action is mapping and action.technique is defined %}
+
+                {% set action_copy = action.copy() %}
+
+                {% set _ = action_copy.update({'phase': normalized_phase | string, 'name': '[FALLBACK] ' ~ action.name}) %}
+
+                {% set _ = processed_list.append(action_copy) %}
+
+              {% endif %}
+
+            {% endfor %}
+
+          {% endif %}
+
+        {% endif %}
+
+      {% endfor %}
+
+      {{ processed_list | from_yaml }}
+
+  when: 
+
+    - group_techniques | length == 0
+
+    - prior_group_techniques | length > 0
+
+  tags: engine
+
+
+# 4. ROUTING STRATEGY: Enforce exactly ONE attack per phase, EXCEPT lateral-movement
+
+- name: Select Techniques for Phase Execution
+
+  set_fact:
+
+    phase_techniques: >-
+
+      {% if normalized_phase == 'lateral-movement' %}
+
+        {{ group_techniques }}
+
+      {% elif group_techniques | length > 0 %}
+
+        [ {{ group_techniques | first }} ]
+
+      {% elif prior_group_techniques | length > 0 and (global_phase_fallback | default([]) | length > 0) %}
+
+        [ {{ global_phase_fallback | shuffle | first }} ]
+
+      {% else %}
+
+        []
+
+      {% endif %}
+
+  tags: engine
+
+
+- name: Force Fact Structural Re-Cast to Array List
+
+  set_fact:
+
+    phase_techniques: "{{ phase_techniques | from_yaml }}"
+
+  tags: engine
+
+
+# í ½í» ï¸ FIXED: Safe debug block that checks array length before reading attributes
+
+- name: DEBUG Single Phase Execution Routing Strategy
 
   debug:
 
@@ -46,14 +139,14 @@
 
       Phase={{ normalized_phase }}
 
-      Host={{ inventory_hostname }}
+      Is Fallback Activated={{ (group_techniques | length == 0 and prior_group_techniques | length > 0) | bool }}
 
-      Is Compromised={{ is_compromised | bool }}
-
-      Technique Count={{ phase_techniques | length }}
+      Selected Technique={{ (phase_techniques | length > 0) | ternary(phase_techniques | map(attribute='technique') | first | default('NONE'), 'NONE') }}
 
   tags: engine
 
+
+# 5. Fire execution down the pipeline
 
 - name: Execute Cyber Range Techniques
 
@@ -72,7 +165,5 @@
   when:
 
     - phase_techniques | length > 0
-
-    - is_compromised | bool
 
   tags: engine

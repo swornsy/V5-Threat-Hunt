@@ -2,7 +2,7 @@
 
 # ================================================================
 
-# CYBER RANGE ENGINE - RUN PHASE HANDLER
+# CYBER RANGE ENGINE - RUN PHASE HANDLER (FINAL PRODUCTION SAFE)
 
 # ================================================================
 
@@ -21,7 +21,7 @@
 
   debug:
 
-    msg: "Phase={{ normalized_phase }} ({{ normalized_phase | type_debug }})"
+    msg: "Phase={{ normalized_phase }}"
 
   tags: engine
 
@@ -29,7 +29,7 @@
 
 # ---------------------------------------------------------------
 
-# Evaluate if host is compromised (foothold logic)
+# Evaluate if host is compromised
 
 # ---------------------------------------------------------------
 
@@ -46,7 +46,7 @@
 
 # ---------------------------------------------------------------
 
-# Build technique list for this phase (FIXED VERSION)
+# Build phase-specific techniques
 
 # ---------------------------------------------------------------
 
@@ -63,12 +63,63 @@
 
 # ---------------------------------------------------------------
 
-# Debug phase execution
+# Build global fallback pool (exclude already used)
 
 # ---------------------------------------------------------------
 
 
-- name: DEBUG phase execution
+- name: Build global technique pool
+
+  set_fact:
+
+    global_techniques: "{{ (attack_sequence | rejectattr('technique', 'in', used_techniques | default([])) | list) | default([]) }}"
+
+  tags: engine
+
+
+
+# ---------------------------------------------------------------
+
+# Determine number of techniques (SAFE TYPE)
+
+# ---------------------------------------------------------------
+
+
+- name: Determine number of techniques
+
+  set_fact:
+
+    selected_count: "{{ (1 if attack_behaviour == 'stealthy' else (range(1,3) | random)) | int }}"
+
+  tags: engine
+
+
+
+# ---------------------------------------------------------------
+
+# Select techniques (PHASE FIRST → FALLBACK SAFE)
+
+# ---------------------------------------------------------------
+
+
+- name: Select techniques for execution
+
+  set_fact:
+
+    selected_phase_techniques: "{{ (((phase_techniques if (phase_techniques | length > 0) else global_techniques) | shuffle)[0:(selected_count | int)]) }}"
+
+  tags: engine
+
+
+
+# ---------------------------------------------------------------
+
+# DEBUG selection (CRITICAL VISIBILITY)
+
+# ---------------------------------------------------------------
+
+
+- name: DEBUG selection logic
 
   debug:
 
@@ -78,9 +129,13 @@
 
       Host={{ inventory_hostname }}
 
-      Is Compromised={{ is_compromised | bool }}
+      PhaseTechniques={{ phase_techniques | length }}
 
-      Technique Count={{ phase_techniques | length }}
+      FallbackPool={{ global_techniques | length }}
+
+      SelectedCount={{ selected_count }}
+
+      SelectedActual={{ selected_phase_techniques | length }}
 
   tags: engine
 
@@ -88,7 +143,7 @@
 
 # ---------------------------------------------------------------
 
-# Execute techniques for this phase
+# Execute techniques
 
 # ---------------------------------------------------------------
 
@@ -103,7 +158,7 @@
 
     current_phase: "{{ normalized_phase }}"
 
-  loop: "{{ phase_techniques }}"
+  loop: "{{ selected_phase_techniques }}"
 
   loop_control:
 
@@ -111,9 +166,7 @@
 
   when:
 
-    - phase_techniques is defined
-
-    - phase_techniques | length > 0
+    - selected_phase_techniques | length > 0
 
     - is_compromised | bool
 

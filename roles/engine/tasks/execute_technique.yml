@@ -61,7 +61,12 @@
 
 
 
-# ✅ Keep existing in-memory tracking (unchanged)
+# ---------------------------------------------------------------
+
+# Track techniques (memory)
+
+# ---------------------------------------------------------------
+
 
 - name: Track technique
 
@@ -73,7 +78,12 @@
 
 
 
-# ✅ ✅ ✅ NEW — CENTRAL LOGGING ON ANSIBLE CONTROLLER
+# ---------------------------------------------------------------
+
+# CENTRAL LOGGING (CONTROL NODE)
+
+# ---------------------------------------------------------------
+
 
 - name: Write technique execution to controller log
 
@@ -106,3 +116,4 @@
   when: execution_result is defined
 
   tags: engine
+

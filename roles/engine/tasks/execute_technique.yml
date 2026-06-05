@@ -1,5 +1,6 @@
 ---
 
+
 - name: Validate selected action
 
   assert:
@@ -15,11 +16,12 @@
   tags: engine
 
 
+
 - name: DEBUG execution
 
   debug:
 
-    msg: >
+    msg: >-
 
       Executing {{ selected_action.name }}
 
@@ -30,6 +32,7 @@
       Host={{ inventory_hostname }}
 
   tags: engine
+
 
 
 - name: Simulate execution
@@ -47,6 +50,7 @@
   tags: engine
 
 
+
 - name: DEBUG result
 
   debug:
@@ -56,10 +60,49 @@
   tags: engine
 
 
+
+# ✅ Keep existing in-memory tracking (unchanged)
+
 - name: Track technique
 
   set_fact:
 
     used_techniques: "{{ (used_techniques | default([])) + [ selected_action.technique ] }}"
+
+  tags: engine
+
+
+
+# ✅ ✅ ✅ NEW — CENTRAL LOGGING ON ANSIBLE CONTROLLER
+
+- name: Write technique execution to controller log
+
+  delegate_to: localhost
+
+  run_once: false
+
+  lineinfile:
+
+    path: /tmp/adversary_activity.log
+
+    create: yes
+
+    insertafter: EOF
+
+    line: >-
+
+      [SIM]
+
+      Host={{ inventory_hostname }}
+
+      Phase={{ selected_action.phase }}
+
+      Technique={{ selected_action.technique }}
+
+      Output={{ execution_result.stdout_lines | default([]) | join(' | ') }}
+
+      Time={{ ansible_date_time.iso8601 }}
+
+  when: execution_result is defined
 
   tags: engine

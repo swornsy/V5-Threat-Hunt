@@ -1,5 +1,12 @@
 ---
 
+# ================================================================
+
+# CYBER RANGE ENGINE - RUN PHASE HANDLER
+
+# ================================================================
+
+
 - name: Normalize phase
 
   set_fact:
@@ -7,6 +14,7 @@
     normalized_phase: "{{ master_loop_phase | string | trim | lower }}"
 
   tags: engine
+
 
 
 - name: DEBUG normalized phase
@@ -18,7 +26,13 @@
   tags: engine
 
 
-# ⚡ THE FIX: Dynamically evaluate if the current host is inside the compromised foothold map
+
+# ---------------------------------------------------------------
+
+# Evaluate if host is compromised (foothold logic)
+
+# ---------------------------------------------------------------
+
 
 - name: Evaluate Host Foothold Compromise Status
 
@@ -29,20 +43,36 @@
   tags: engine
 
 
+
+# ---------------------------------------------------------------
+
+# Build technique list for this phase (FIXED VERSION)
+
+# ---------------------------------------------------------------
+
+
 - name: Build phase-specific technique list
 
   set_fact:
 
-    phase_techniques: "{{ attack_sequence | selectattr('phase', 'equalto', normalized_phase) | list }}"
+    phase_techniques: "{{ (attack_sequence | selectattr('phase', 'equalto', normalized_phase) | list) | default([]) }}"
 
   tags: engine
+
+
+
+# ---------------------------------------------------------------
+
+# Debug phase execution
+
+# ---------------------------------------------------------------
 
 
 - name: DEBUG phase execution
 
   debug:
 
-    msg: >
+    msg: >-
 
       Phase={{ normalized_phase }}
 
@@ -55,6 +85,14 @@
   tags: engine
 
 
+
+# ---------------------------------------------------------------
+
+# Execute techniques for this phase
+
+# ---------------------------------------------------------------
+
+
 - name: Execute Cyber Range Techniques
 
   include_tasks: execute_technique.yml
@@ -63,6 +101,8 @@
 
     selected_action: "{{ technique }}"
 
+    current_phase: "{{ normalized_phase }}"
+
   loop: "{{ phase_techniques }}"
 
   loop_control:
@@ -70,6 +110,8 @@
     loop_var: technique
 
   when:
+
+    - phase_techniques is defined
 
     - phase_techniques | length > 0
 

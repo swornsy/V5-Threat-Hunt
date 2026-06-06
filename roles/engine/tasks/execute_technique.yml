@@ -2,46 +2,193 @@
 
 # ========================================================================
 
-# CYBER RANGE ENGINE - ACTION EXECUTION (roles/engine/tasks/execute_technique.yml)
+# MULTI-OS STATEFUL PROCESS ENGINE - DECOUPLED PROCESS LINEAGE (execute_technique.yml)
 
 # ========================================================================
 
 
-- name: Validate selected action matrix structure
+- name: Establish Cross-Platform Host Environment Variables
 
-  assert:
+  set_fact:
 
-    that:
+    is_windows: "{{ ansible_os_family == 'Windows' }}"
 
-      - selected_action is mapping
-
-      - selected_action.technique is defined
-
-      - selected_action.phase is defined
+    short_host: "{{ inventory_hostname | split('.') | first }}"
 
   tags: engine
 
 
-- name: DEBUG Active Execution Metadata
+# ------------------------------------------------------------------------
 
-  debug:
+# DETACHED FORENSIC WORKER ASSURANCE LOOP
 
-    msg: >-
+# ------------------------------------------------------------------------
 
-      Executing {{ selected_action.name }}
+- name: "[WINDOWS] Enforce RangeEngine Target Runtime Directory"
 
-      ({{ selected_action.technique }})
+  win_file:
 
-      Phase={{ selected_action.phase }}
+    path: C:\ProgramData\RangeEngine
 
-      Host={{ inventory_hostname }}
+    state: directory
+
+  when: is_windows | bool
 
   tags: engine
 
 
-- name: Simulate Technique Shell Execution Block
+- name: "[WINDOWS] Bootstrap Persistent Background Foothold Engine"
+
+  win_copy:
+
+    src: worker.ps1
+
+    dest: C:\ProgramData\RangeEngine\worker.ps1
+
+  when: is_windows | bool
+
+  tags: engine
+
+
+- name: "[WINDOWS] Start Hidden Detached User-Space Worker via WMI Engine"
 
   win_shell: |
+
+    $WorkDir = "C:\ProgramData\RangeEngine"
+
+    $Path = "$WorkDir\worker.ps1"
+
+    $LockFile = "$WorkDir\worker.lock"
+
+    
+
+    $NeedsStart = $true
+
+    if (Test-Path $LockFile) {
+
+        $SavedPID = (Get-Content $LockFile -Raw).Trim()
+
+        $Proc = Get-Process -Id $SavedPID -ErrorAction SilentlyContinue
+
+        if ($Proc -and $Proc.ProcessName -eq "powershell") {
+
+            $NeedsStart = $false
+
+            echo $SavedPID
+
+        }
+
+    }
+
+    
+
+    if ($NeedsStart) {
+
+        if (Test-Path $LockFile) { Remove-Item $LockFile -Force }
+
+        $ResultFile = "$WorkDir\result.txt"
+
+        if (Test-Path $ResultFile) { Remove-Item $ResultFile -Force }
+
+        
+
+        # Break free from WinRM task container boundaries via WMI Process Factory
+
+        $Command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $Path"
+
+        $InvokeWmi = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+
+            CommandLine = $Command
+
+            CurrentDirectory = $WorkDir
+
+        }
+
+        
+
+        # Await lock initialization signature
+
+        $Wait = 0
+
+        while (-not (Test-Path $LockFile) -and $Wait -lt 14) { Start-Sleep -Milliseconds 500; $Wait++ }
+
+        (Get-Content $LockFile -Raw).Trim()
+
+    }
+
+  register: win_worker_pid_capture
+
+  when: is_windows | bool
+
+  tags: engine
+
+
+- name: "[LINUX] Bootstrap Persistent Background Foothold Engine"
+
+  copy:
+
+    src: worker.sh
+
+    dest: /tmp/.range_engine/worker.sh
+
+    mode: '0700'
+
+  when: not (is_windows | bool)
+
+  tags: engine
+
+
+- name: "[LINUX] Start Hidden Persistent Worker Shell Instantiation"
+
+  shell: |
+
+    if ! pgrep -f "worker.sh" > /dev/null; then
+
+        nohup /tmp/.range_engine/worker.sh >/dev/null 2>&1 &
+
+        sleep 1
+
+    fi
+
+    pgrep -f "worker.sh" | head -n 1
+
+  register: linux_worker_pid_capture
+
+  when: not (is_windows | bool)
+
+  tags: engine
+
+
+- name: Set Unified Parent Foothold PID Fact
+
+  set_fact:
+
+    foothold_parent_pid: "{{ win_worker_pid_capture.stdout | trim if is_windows | bool else linux_worker_pid_capture.stdout | trim }}"
+
+  tags: engine
+
+
+# ------------------------------------------------------------------------
+
+# TECHNIQUE PIPELINE EXECUTION INTERFACES (Synchronous Execution Handshake)
+
+# ------------------------------------------------------------------------
+
+- name: "[WINDOWS] Route Attack Payload & Await Execution Response"
+
+  win_shell: |
+
+    $WorkDir = "C:\ProgramData\RangeEngine"
+
+    $QueueFile = "$WorkDir\incoming.ps1"
+
+    $ResultFile = "$WorkDir\result.txt"
+
+
+    if (Test-Path $ResultFile) { Remove-Item $ResultFile -Force }
+
+
+    $Payload = @'
 
     echo "[SIM] {{ selected_action.name }} ({{ selected_action.technique }})"
 
@@ -49,73 +196,110 @@
 
     hostname
 
-  register: execution_result
+    '@
+
+    $Payload | Out-File -FilePath $QueueFile -Encoding ascii
+
+
+    $Timeout = 30
+
+    $Counter = 0
+
+    while (-not (Test-Path $ResultFile) -and $Counter -lt ($Timeout * 2)) {
+
+        Start-Sleep -Milliseconds 500
+
+        $Counter++
+
+    }
+
+
+    if (Test-Path $ResultFile) {
+
+        Get-Content $ResultFile -Raw
+
+    } else {
+
+        throw "Background worker orchestration tracking timeout occurred on target endpoint."
+
+    }
+
+  register: win_output
+
+  when: is_windows | bool
 
   tags: engine
 
 
-- name: DEBUG Command Output Contexts
+- name: "[LINUX] Route Attack Payload & Await Execution Response"
 
-  debug:
+  shell: |
 
-    var: execution_result.stdout_lines
+    WORK_DIR="/tmp/.range_engine"
+
+    QUEUE_FILE="$WORK_DIR/incoming.sh"
+
+    RESULT_FILE="$WORK_DIR/result.txt"
+
+
+    rm -f "$RESULT_FILE"
+
+
+    echo "echo '[SIM] {{ selected_action.name }} ({{ selected_action.technique }})'" > "$QUEUE_FILE"
+
+    echo "echo 'Phase={{ selected_action.phase }}'" >> "$QUEUE_FILE"
+
+    echo "hostname" >> "$QUEUE_FILE"
+
+
+    TIMEOUT=30
+
+    COUNTER=0
+
+    while [ ! -f "$RESULT_FILE" ] && [ $COUNTER -lt $((TIMEOUT * 2)) ]; do
+
+        sleep 0.5
+
+        COUNTER=$((COUNTER + 1))
+
+    done
+
+
+    if [ -f "$RESULT_FILE" ]; then
+
+        cat "$RESULT_FILE"
+
+    else
+
+        echo "Background worker orchestration tracking timeout occurred on target endpoint." && exit 1
+
+    fi
+
+  register: linux_output
+
+  when: not (is_windows | bool)
 
   tags: engine
 
 
-# ------------------------------------------------------------------------
-
-# PIVOT TRIGGER: Safely add next pool target to compromised list
-
-# ------------------------------------------------------------------------
-
-- name: Evaluate and Expand Foothold to Next Downstream Target
+- name: Parse Engine Telemetry Logs
 
   set_fact:
 
-    compromised_hosts: "{{ hostvars['localhost']['compromised_hosts'] + [ hostvars['localhost']['allowed_downstream_targets'][hostvars['localhost']['compromised_hosts'] | length - 1] ] }}"
-
-  delegate_to: localhost
-
-  delegate_facts: true
-
-  when:
-
-    - normalized_phase in ['lateral-movement', 'lateral_movement']
-
-    - execution_result.rc | default(0) == 0
-
-    - (hostvars['localhost']['compromised_hosts'] | length - 1) < (hostvars['localhost']['allowed_downstream_targets'] | length)
+    command_stdout: "{{ win_output.stdout_lines if is_windows | bool else linux_output.stdout_lines }}"
 
   tags: engine
 
 
 # ------------------------------------------------------------------------
 
-# Track Completed Techniques in Memory
+# SYSTEM LEDGER MATRIX LOGGING
 
 # ------------------------------------------------------------------------
 
-- name: Track technique execution history to block replication
-
-  set_fact:
-
-    used_techniques: "{{ (used_techniques | default([])) + [ selected_action.technique ] }}"
-
-  tags: engine
-
-
-# ------------------------------------------------------------------------
-
-# CENTRAL LOGGING (CONTROL NODE)
-
-# ------------------------------------------------------------------------
-
-- name: Write technique execution tracks to central range history logs
+- name: Write Unified Stateful Process Activity Logs to Ledger
 
   delegate_to: localhost
-
-  run_once: false
 
   lineinfile:
 
@@ -125,37 +309,42 @@
 
     insertafter: EOF
 
-    line: >-
+    line: |
 
-      [SIM]
+      ========================================================================
 
-      Host={{ inventory_hostname }}
+      [STATEFUL ATTACK TIMELINE EVENT]
 
-      Phase={{ selected_action.phase }}
+      Host= {{ short_host }} | OS_Platform= {{ ansible_os_family }}
 
-      Technique={{ selected_action.technique }}
+      Phase= {{ selected_action.phase }} | Technique= {{ selected_action.technique }}
 
-      Output={{ execution_result.stdout_lines | default([]) | join(' | ') }}
+      PERSISTENT_FOOTHOLD_PARENT_PID= {{ foothold_parent_pid }}
 
-      Time={{ ansible_date_time.iso8601 }}
+      Time= {{ ansible_date_time.iso8601 }}
 
-  when: execution_result is defined
+      ------------------------------------------------------------------------
 
-  tags: engine
+      [SIEM INVESTIGATION HINTS - TARGET TELEMETRY LOOKUPS (ESC / EQL)]
 
+      
 
-# ------------------------------------------------------------------------
+      /* 1. Track All Activity Originating From This Persistent Foothold Shell */
 
-# ✅ FIXED PACING DELAY: Force progressive serialization delays
+      process where host.name == "{{ short_host }}" and process.parent.pid == {{ foothold_parent_pid }}
 
-# ------------------------------------------------------------------------
+      
 
-- name: Simulate realistic staggered dwell time pacing between attacks
+      /* 2. Track File Lifecycle Alterations dropped by this Session */
 
-  delegate_to: localhost
+      file where host.name == "{{ short_host }}" and process.parent.pid == {{ foothold_parent_pid }} and event.action in ("creation", "modification")
 
-  pause:
+      
 
-    seconds: "{{ ((ansible_play_hosts.index(inventory_hostname) + 1) * 3) + (range(2, 6) | random) }}"
+      /* 3. Track Network Infrastructure Callouts originating from this session */
+
+      network where host.name == "{{ short_host }}" and process.parent.pid == {{ foothold_parent_pid }}
+
+      ========================================================================
 
   tags: engine

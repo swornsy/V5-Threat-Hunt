@@ -1,0 +1,53 @@
+---
+
+# ========================================================================
+
+# CYBER RANGE HYGIENE SYSTEM - SELF-DESTRUCT ENGINE (cleanup.yml)
+
+# ========================================================================
+
+
+- name: Establish Platform Mapping Elements
+
+  set_fact:
+
+    is_windows: "{{ ansible_os_family == 'Windows' }}"
+
+  tags: always
+
+
+- name: [WINDOWS] Issue Poison-Pill Worker Self-Destruct State
+
+  win_copy:
+
+    content: "terminate"
+
+    dest: C:\ProgramData\RangeEngine\worker.status
+
+  when: is_windows | bool
+
+  tags: always
+
+
+- name: [LINUX] Issue Poison-Pill Worker Self-Destruct State
+
+  copy:
+
+    content: "terminate"
+
+    dest: /tmp/.range_engine/worker.status
+
+  when: not (is_windows | bool)
+
+  tags: always
+
+
+- name: Enforce Small Sync Window for Worker Cleanup Sequences
+
+  pause:
+
+    seconds: 3
+
+  run_once: true
+
+  tags: always

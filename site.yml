@@ -1,5 +1,6 @@
 ---
 
+
 - name: V5 Threat Hunt Adversary Emulation Engine (Testable Build)
 
   hosts: windows
@@ -9,28 +10,24 @@
 
   vars:
 
-    # ✅ Default test switches
+    # Default test switches
 
     test_single_phase: false
 
     test_phase_name: "execution"
-
 
     test_single_technique: false
 
     test_technique_id: "t1059.001"
 
 
-
   pre_tasks:
-
 
     # ==========================================================
 
     # ✅ SEED GLOBAL ORCHESTRATION PHASES VIA FACTS
 
     # ==========================================================
-
 
     - name: Initialize Global Cyber Range ATT&CK Phases
 
@@ -67,13 +64,11 @@
       tags: always
 
 
-
     # ==========================================================
 
-    # ✅ LOAD MATRIX
+    # ✅ LOAD MATRIX (ALWAYS)
 
     # ==========================================================
-
 
     - name: Load attack matrix
 
@@ -90,32 +85,11 @@
       tags: always
 
 
-
     # ==========================================================
 
-    # ✅ DEBUG ACTOR
+    # ✅ PARSE AND FLATTEN CAMPAIGN MATRIX NATIVELY ON ALL HOSTS
 
     # ==========================================================
-
-
-    - name: DEBUG actor selection
-
-      debug:
-
-        msg: "Using actor {{ selected_actor_id | default('G0016') }}"
-
-      run_once: true
-
-      tags: always
-
-
-
-    # ==========================================================
-
-    # ✅ BUILD ATTACK SEQUENCE
-
-    # ==========================================================
-
 
     - name: Parse and Flatten Target Attack Sequence Array
 
@@ -153,10 +127,7 @@
 
           {{ processed_list }}
 
-        used_techniques: []
-
       tags: always
-
 
 
     - name: Force Strict Structural Type Casting
@@ -170,75 +141,17 @@
       tags: always
 
 
+    # ==========================================================
+
+    # ✅ DYNAMIC TARGET POOL RANDOMIZATION
 
     # ==========================================================
 
-    # ✅ TEST FILTERS
-
-    # ==========================================================
-
-
-    - name: Apply Troubleshooting Filters (Single Phase Test)
+    - name: Establish Patient Zero and Random Downstream Targets
 
       set_fact:
 
-        attack_sequence: "{{ attack_sequence | selectattr('phase', 'equalto', test_phase_name) | list }}"
-
-      when: test_single_phase | bool
-
-      tags: troubleshooting
-
-
-
-    - name: Apply Troubleshooting Filters (Single Technique Test)
-
-      set_fact:
-
-        attack_sequence: "{{ attack_sequence | selectattr('technique', 'equalto', test_technique_id | upper) | list }}"
-
-      when: test_single_technique | bool
-
-      tags: troubleshooting
-
-
-
-    - name: DEBUG Final Flattened Attack Sequence Output
-
-      debug:
-
-        var: attack_sequence
-
-      run_once: true
-
-      tags: troubleshooting
-
-
-
-    # ==========================================================
-
-    # ✅ FIXED PATIENT ZERO SELECTION (CRITICAL FIX)
-
-    # ==========================================================
-
-
-    - name: Build workstation candidate list
-
-      set_fact:
-
-        workstation_hosts: "{{ groups['windows'] | select('match', '.*wks.*') | list }}"
-
-      delegate_to: localhost
-
-      run_once: true
-
-
-    - name: Select patient zero from workstations
-
-      set_fact:
-
-        compromised_hosts:
-
-          - "{{ workstation_hosts | shuffle | first }}"
+        shuffled_hosts: "{{ groups['windows'] | shuffle }}"
 
       delegate_to: localhost
 
@@ -246,17 +159,16 @@
 
       run_once: true
 
-      when: workstation_hosts | length > 0
+      tags: always
 
 
-
-    - name: Fallback patient zero (no workstations present)
+    - name: Assign Campaign Hosts and Set Group Limits
 
       set_fact:
 
-        compromised_hosts:
+        patient_zero_host: "{{ hostvars['localhost']['shuffled_hosts'] | first }}"
 
-          - "{{ groups['windows'] | shuffle | first }}"
+        downstream_count: "{{ range(0, 3) | random }}"
 
       delegate_to: localhost
 
@@ -264,22 +176,43 @@
 
       run_once: true
 
-      when:
-
-        - workstation_hosts | length == 0
-
-        - hostvars['localhost']['compromised_hosts'] is not defined
+      tags: always
 
 
+    - name: Finalize Allowed Lateral Target Pool
 
-    - name: DEBUG Patient Zero
+      set_fact:
 
-      debug:
+        allowed_downstream_targets: "{{ hostvars['localhost']['shuffled_hosts'][1:(1 + hostvars['localhost']['downstream_count'] | int)] }}"
 
-        msg: "Patient Zero = {{ hostvars['localhost']['compromised_hosts'][0] }}"
+        compromised_hosts: ["{{ hostvars['localhost']['patient_zero_host'] }}"]
+
+      delegate_to: localhost
+
+      delegate_facts: true
 
       run_once: true
 
+      tags: always
+
+
+    - name: DEBUG Campaign Initialization Layout
+
+      debug:
+
+        msg: >-
+
+          Patient Zero Host = {{ hostvars['localhost']['patient_zero_host'] }}
+
+          Number of Downstream Allowed = {{ hostvars['localhost']['downstream_count'] }}
+
+          Allowed Downstream Targets = {{ hostvars['localhost']['allowed_downstream_targets'] }}
+
+      delegate_to: localhost
+
+      run_once: true
+
+      tags: always
 
 
   roles:

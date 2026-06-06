@@ -1,7 +1,13 @@
 ---
 
+# ========================================================================
 
-- name: Validate selected action
+# CYBER RANGE ENGINE - ACTION EXECUTION (roles/engine/tasks/execute_technique.yml)
+
+# ========================================================================
+
+
+- name: Validate selected action matrix structure
 
   assert:
 
@@ -16,8 +22,7 @@
   tags: engine
 
 
-
-- name: DEBUG execution
+- name: DEBUG Active Execution Metadata
 
   debug:
 
@@ -34,8 +39,7 @@
   tags: engine
 
 
-
-- name: Simulate execution
+- name: Simulate Technique Shell Execution Block
 
   win_shell: |
 
@@ -50,8 +54,7 @@
   tags: engine
 
 
-
-- name: DEBUG result
+- name: DEBUG Command Output Contexts
 
   debug:
 
@@ -60,15 +63,40 @@
   tags: engine
 
 
+# ------------------------------------------------------------------------
 
-# ---------------------------------------------------------------
+# PIVOT TRIGGER: Safely add next pool target to compromised list
 
-# Track techniques (memory)
+# ------------------------------------------------------------------------
 
-# ---------------------------------------------------------------
+- name: Evaluate and Expand Foothold to Next Downstream Target
+
+  set_fact:
+
+    compromised_hosts: "{{ hostvars['localhost']['compromised_hosts'] + [ hostvars['localhost']['allowed_downstream_targets'][hostvars['localhost']['compromised_hosts'] | length - 1] ] }}"
+
+  delegate_to: localhost
+
+  delegate_facts: true
+
+  when:
+
+    - normalized_phase in ['lateral-movement', 'lateral_movement']
+
+    - execution_result.rc | default(0) == 0
+
+    - (hostvars['localhost']['compromised_hosts'] | length - 1) < (hostvars['localhost']['allowed_downstream_targets'] | length)
+
+  tags: engine
 
 
-- name: Track technique
+# ------------------------------------------------------------------------
+
+# Track Completed Techniques in Memory
+
+# ------------------------------------------------------------------------
+
+- name: Track technique execution history to block replication
 
   set_fact:
 
@@ -77,15 +105,13 @@
   tags: engine
 
 
-
-# ---------------------------------------------------------------
+# ------------------------------------------------------------------------
 
 # CENTRAL LOGGING (CONTROL NODE)
 
-# ---------------------------------------------------------------
+# ------------------------------------------------------------------------
 
-
-- name: Write technique execution to controller log
+- name: Write technique execution tracks to central range history logs
 
   delegate_to: localhost
 
@@ -117,3 +143,19 @@
 
   tags: engine
 
+
+# ------------------------------------------------------------------------
+
+# ✅ FIXED PACING DELAY: Force progressive serialization delays
+
+# ------------------------------------------------------------------------
+
+- name: Simulate realistic staggered dwell time pacing between attacks
+
+  delegate_to: localhost
+
+  pause:
+
+    seconds: "{{ ((ansible_play_hosts.index(inventory_hostname) + 1) * 3) + (range(2, 6) | random) }}"
+
+  tags: engine

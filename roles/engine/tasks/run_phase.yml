@@ -2,24 +2,9 @@
 
 # ================================================================
 
-# CYBER RANGE ENGINE - RUN PHASE HANDLER (ULTIMATE STABLE BUILD)
+# CYBER RANGE ENGINE - STATE + HOST-LIMIT RUN PHASE HANDLER
 
 # ================================================================
-
-
-# ---------------------------------------------------------------
-
-# HARD GUARD: Prevent phase from running more than once per host
-
-# ---------------------------------------------------------------
-
-
-- name: Skip phase if already executed on this host
-
-  meta: end_host
-
-  when: hostvars[inventory_hostname]["phase_done_" + master_loop_phase] is defined
-
 
 
 # ---------------------------------------------------------------
@@ -35,40 +20,140 @@
 
     normalized_phase: "{{ master_loop_phase | string | trim | lower }}"
 
-  tags: engine
-
-
-
-- name: DEBUG normalized phase
-
-  debug:
-
-    msg: "Phase={{ normalized_phase }}"
-
-  tags: engine
-
 
 
 # ---------------------------------------------------------------
 
-# Evaluate compromise state
+# INITIALIZE COMPROMISED HOST TRACKING (GLOBAL)
 
 # ---------------------------------------------------------------
 
 
-- name: Evaluate Host Foothold Compromise Status
+- name: Initialize compromised hosts list
 
   set_fact:
 
-    is_compromised: "{{ inventory_hostname in (hostvars['localhost']['compromised_hosts'] | default([])) or (inventory_hostname | split('.') | first) in (hostvars['localhost']['compromised_hosts'] | default([])) }}"
+    compromised_hosts: []
 
-  tags: engine
+  delegate_to: localhost
+
+  run_once: true
+
+  when: hostvars['localhost']['compromised_hosts'] is not defined
 
 
 
 # ---------------------------------------------------------------
 
-# Build phase-specific techniques
+# INITIALIZE STATE PER HOST
+
+# ---------------------------------------------------------------
+
+
+- name: Initialize attack state
+
+  set_fact:
+
+    has_access: false
+
+    is_privileged: false
+
+    has_lateral: false
+
+  when: has_access is not defined
+
+
+
+# ---------------------------------------------------------------
+
+# STATE ENFORCEMENT + HOST LIMIT LOGIC
+
+# ---------------------------------------------------------------
+
+
+- name: Enforce attack state rules
+
+  set_fact:
+
+    phase_allowed: >-
+
+      {{
+
+        (normalized_phase == 'initial_access')
+
+        or
+
+        (normalized_phase in ['execution','persistence'] and has_access)
+
+        or
+
+        (normalized_phase == 'privilege_escalation' and has_access)
+
+        or (
+
+          normalized_phase == 'lateral_movement'
+
+          and is_privileged
+
+          and (hostvars['localhost']['compromised_hosts'] | length < 3)
+
+        )
+
+        or (normalized_phase == 'c2' and has_lateral)
+
+        or (normalized_phase == 'exfiltration' and has_lateral)
+
+      }}
+
+
+
+# ---------------------------------------------------------------
+
+# DEBUG STATE (optional but very useful)
+
+# ---------------------------------------------------------------
+
+
+- name: DEBUG state enforcement
+
+  debug:
+
+    msg: >
+
+      Host={{ inventory_hostname }}
+
+      Phase={{ normalized_phase }}
+
+      Allowed={{ phase_allowed }}
+
+      has_access={{ has_access }}
+
+      is_privileged={{ is_privileged }}
+
+      has_lateral={{ has_lateral }}
+
+      CompromisedHosts={{ hostvars['localhost']['compromised_hosts'] }}
+
+
+
+# ---------------------------------------------------------------
+
+# SKIP IF NOT ALLOWED
+
+# ---------------------------------------------------------------
+
+
+- name: Skip phase if not allowed
+
+  meta: end_host
+
+  when: not phase_allowed
+
+
+
+# ---------------------------------------------------------------
+
+# BUILD TECHNIQUES
 
 # ---------------------------------------------------------------
 
@@ -79,13 +164,11 @@
 
     phase_techniques: "{{ attack_sequence | selectattr('phase', 'equalto', normalized_phase) | list | default([]) }}"
 
-  tags: engine
-
 
 
 # ---------------------------------------------------------------
 
-# Remove already-used techniques
+# REMOVE USED TECHNIQUES
 
 # ---------------------------------------------------------------
 
@@ -96,30 +179,11 @@
 
     phase_techniques: "{{ phase_techniques | rejectattr('technique', 'in', used_techniques | default([])) | list }}"
 
-  tags: engine
-
-
-
-# ---------------------------------------------------------------
-
-# Build fallback global pool
-
-# ---------------------------------------------------------------
-
-
-- name: Build global technique pool
-
-  set_fact:
-
-    global_techniques: "{{ attack_sequence | rejectattr('technique', 'in', used_techniques | default([])) | list }}"
-
-  tags: engine
-
 
 
 # ---------------------------------------------------------------
 
-# Determine behaviour-driven count
+# DETERMINE COUNT
 
 # ---------------------------------------------------------------
 
@@ -130,63 +194,28 @@
 
     selected_count: "{{ (1 if attack_behaviour == 'stealthy' else (range(1,3) | random)) }}"
 
-  tags: engine
-
 
 
 # ---------------------------------------------------------------
 
-# Select techniques (ONCE per phase)
+# SELECT TECHNIQUES
 
 # ---------------------------------------------------------------
 
 
-- name: Select techniques for execution
+- name: Select techniques
 
   set_fact:
 
-    selected_phase_techniques: "{{ (((phase_techniques if (phase_techniques | length > 0) else global_techniques) | shuffle)[0:(selected_count | int)]) }}"
+    selected_phase_techniques: "{{ (phase_techniques | shuffle)[0:(selected_count | int)] }}"
 
-    "selection_done_{{ normalized_phase }}": true
-
-  when: hostvars[inventory_hostname]['selection_done_' + normalized_phase] is not defined
-
-  tags: engine
+  when: phase_techniques | length > 0
 
 
 
 # ---------------------------------------------------------------
 
-# DEBUG selection
-
-# ---------------------------------------------------------------
-
-
-- name: DEBUG selection logic
-
-  debug:
-
-    msg: >-
-
-      Phase={{ normalized_phase }}
-
-      Host={{ inventory_hostname }}
-
-      PhaseTechniques={{ phase_techniques | length }}
-
-      FallbackPool={{ global_techniques | length }}
-
-      SelectedCount={{ selected_count }}
-
-      SelectedActual={{ selected_phase_techniques | length }}
-
-  tags: engine
-
-
-
-# ---------------------------------------------------------------
-
-# Execute techniques (safe, no duplicates)
+# EXECUTE ONLY IF HOST COMPROMISED OR INITIAL ACCESS
 
 # ---------------------------------------------------------------
 
@@ -201,7 +230,7 @@
 
     current_phase: "{{ normalized_phase }}"
 
-  loop: "{{ selected_phase_techniques | unique(attribute='technique') }}"
+  loop: "{{ selected_phase_techniques | default([]) }}"
 
   loop_control:
 
@@ -209,44 +238,77 @@
 
   when:
 
-    - selected_phase_techniques | length > 0
+    - selected_phase_techniques | default([]) | length > 0
 
-    - is_compromised | bool
+    - (
 
-  tags: engine
+        normalized_phase == 'initial_access'
+
+        or inventory_hostname in hostvars['localhost']['compromised_hosts']
+
+      )
 
 
 
 # ---------------------------------------------------------------
 
-# Mark phase as completed (CRITICAL FINAL FIX)
+# REGISTER INITIAL ACCESS HOST
 
 # ---------------------------------------------------------------
 
 
-- name: Mark phase as completed
+- name: Register initial access host
 
   set_fact:
 
-    "phase_done_{{ normalized_phase }}": true
-
-  tags: engine
-
-
-
-# ---------------------------------------------------------------
-
-# Add dwell time (realistic timing)
-
-# ---------------------------------------------------------------
-
-
-- name: Simulate dwell time between actions
+    compromised_hosts: "{{ (hostvars['localhost']['compromised_hosts'] + [ inventory_hostname ]) | unique }}"
 
   delegate_to: localhost
 
-  pause:
+  when:
 
-    seconds: "{{ range(1,4) | random }}"
+    - normalized_phase == 'initial_access'
 
-  tags: engine
+
+
+# ---------------------------------------------------------------
+
+# ADD HOST DURING LATERAL (LIMIT TO 3 TOTAL)
+
+# ---------------------------------------------------------------
+
+
+- name: Add host via lateral movement
+
+  set_fact:
+
+    compromised_hosts: "{{ (hostvars['localhost']['compromised_hosts'] + [ inventory_hostname ]) | unique }}"
+
+  delegate_to: localhost
+
+  when:
+
+    - normalized_phase == 'lateral_movement'
+
+    - inventory_hostname not in hostvars['localhost']['compromised_hosts']
+
+    - (hostvars['localhost']['compromised_hosts'] | length) < 3
+
+
+
+# ---------------------------------------------------------------
+
+# UPDATE STATE
+
+# ---------------------------------------------------------------
+
+
+- name: Update attack state
+
+  set_fact:
+
+    has_access: "{{ true if normalized_phase == 'initial_access' else has_access }}"
+
+    is_privileged: "{{ true if normalized_phase == 'privilege_escalation' else is_privileged }}"
+
+    has_lateral: "{{ true if normalized_phase == 'lateral_movement' else has_lateral }}"

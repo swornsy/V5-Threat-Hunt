@@ -16,7 +16,20 @@
   tags: always
 
 
-- name: [WINDOWS] Issue Poison-Pill Worker Self-Destruct State
+- name: "[WINDOWS] Check if RangeEngine Directory Exists"
+
+  win_stat:
+
+    path: C:\ProgramData\RangeEngine
+
+  register: win_range_dir
+
+  when: is_windows | bool
+
+  tags: always
+
+
+- name: "[WINDOWS] Issue Poison-Pill Worker Self-Destruct State"
 
   win_copy:
 
@@ -24,12 +37,25 @@
 
     dest: C:\ProgramData\RangeEngine\worker.status
 
-  when: is_windows | bool
+  when: is_windows | bool and win_range_dir.stat.exists | bool
 
   tags: always
 
 
-- name: [LINUX] Issue Poison-Pill Worker Self-Destruct State
+- name: "[LINUX] Check if RangeEngine Directory Exists"
+
+  stat:
+
+    path: /tmp/.range_engine
+
+  register: linux_range_dir
+
+  when: not (is_windows | bool)
+
+  tags: always
+
+
+- name: "[LINUX] Issue Poison-Pill Worker Self-Destruct State"
 
   copy:
 
@@ -37,7 +63,7 @@
 
     dest: /tmp/.range_engine/worker.status
 
-  when: not (is_windows | bool)
+  when: not (is_windows | bool) and linux_range_dir.stat.exists | bool
 
   tags: always
 
@@ -46,7 +72,7 @@
 
   pause:
 
-    seconds: 3
+    seconds: 4
 
   run_once: true
 

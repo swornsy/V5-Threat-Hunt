@@ -56,9 +56,9 @@
 
     $WorkDir = "C:\ProgramData\RangeEngine"
 
-    $Path = "$WorkDir\worker.ps1"
+    $Path = "$WorkDir\\worker.ps1"
 
-    $LockFile = "$WorkDir\worker.lock"
+    $LockFile = "$WorkDir\\worker.lock"
 
     
 
@@ -74,8 +74,6 @@
 
             $NeedsStart = $false
 
-            echo $SavedPID
-
         }
 
     }
@@ -84,216 +82,78 @@
 
     if ($NeedsStart) {
 
-        if (Test-Path $LockFile) { Remove-Item $LockFile -Force }
+        Remove-Item $LockFile -Force -ErrorAction SilentlyContinue
 
-        $ResultFile = "$WorkDir\result.txt"
+        # Spawn completely detached from WinRM parent process session constraints
 
-        if (Test-Path $ResultFile) { Remove-Item $ResultFile -Force }
+        Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
 
-        
+            CommandLine = "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File $Path"
 
-        # Break free from WinRM task container boundaries via WMI Process Factory
+        } | Out-Null
 
-        $Command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File $Path"
-
-        $InvokeWmi = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
-
-            CommandLine = $Command
-
-            CurrentDirectory = $WorkDir
-
-        }
-
-        
-
-        # Await lock initialization signature
-
-        $Wait = 0
-
-        while (-not (Test-Path $LockFile) -and $Wait -lt 14) { Start-Sleep -Milliseconds 500; $Wait++ }
-
-        (Get-Content $LockFile -Raw).Trim()
+        Start-Sleep -Seconds 2
 
     }
 
-  register: win_worker_pid_capture
+    
 
-  when: is_windows | bool
+    if (Test-Path $LockFile) {
 
-  tags: engine
-
-
-- name: "[LINUX] Bootstrap Persistent Background Foothold Engine"
-
-  copy:
-
-    src: worker.sh
-
-    dest: /tmp/.range_engine/worker.sh
-
-    mode: '0700'
-
-  when: not (is_windows | bool)
-
-  tags: engine
-
-
-- name: "[LINUX] Start Hidden Persistent Worker Shell Instantiation"
-
-  shell: |
-
-    if ! pgrep -f "worker.sh" > /dev/null; then
-
-        nohup /tmp/.range_engine/worker.sh >/dev/null 2>&1 &
-
-        sleep 1
-
-    fi
-
-    pgrep -f "worker.sh" | head -n 1
-
-  register: linux_worker_pid_capture
-
-  when: not (is_windows | bool)
-
-  tags: engine
-
-
-- name: Set Unified Parent Foothold PID Fact
-
-  set_fact:
-
-    foothold_parent_pid: "{{ win_worker_pid_capture.stdout | trim if is_windows | bool else linux_worker_pid_capture.stdout | trim }}"
-
-  tags: engine
-
-
-# ------------------------------------------------------------------------
-
-# TECHNIQUE PIPELINE EXECUTION INTERFACES (Synchronous Execution Handshake)
-
-# ------------------------------------------------------------------------
-
-- name: "[WINDOWS] Route Attack Payload & Await Execution Response"
-
-  win_shell: |
-
-    $WorkDir = "C:\ProgramData\RangeEngine"
-
-    $QueueFile = "$WorkDir\incoming.ps1"
-
-    $ResultFile = "$WorkDir\result.txt"
-
-
-    if (Test-Path $ResultFile) { Remove-Item $ResultFile -Force }
-
-
-    $Payload = @'
-
-    echo "[SIM] {{ selected_action.name }} ({{ selected_action.technique }})"
-
-    echo "Phase={{ selected_action.phase }}"
-
-    hostname
-
-    '@
-
-    $Payload | Out-File -FilePath $QueueFile -Encoding ascii
-
-
-    $Timeout = 30
-
-    $Counter = 0
-
-    while (-not (Test-Path $ResultFile) -and $Counter -lt ($Timeout * 2)) {
-
-        Start-Sleep -Milliseconds 500
-
-        $Counter++
-
-    }
-
-
-    if (Test-Path $ResultFile) {
-
-        Get-Content $ResultFile -Raw
+        return (Get-Content $LockFile -Raw).Trim()
 
     } else {
 
-        throw "Background worker orchestration tracking timeout occurred on target endpoint."
+        throw "Failed to capture operational process foothold PID context"
 
     }
 
-  register: win_output
+  register: win_foothold_spawn
 
   when: is_windows | bool
 
   tags: engine
 
 
-- name: "[LINUX] Route Attack Payload & Await Execution Response"
-
-  shell: |
-
-    WORK_DIR="/tmp/.range_engine"
-
-    QUEUE_FILE="$WORK_DIR/incoming.sh"
-
-    RESULT_FILE="$WORK_DIR/result.txt"
-
-
-    rm -f "$RESULT_FILE"
-
-
-    echo "echo '[SIM] {{ selected_action.name }} ({{ selected_action.technique }})'" > "$QUEUE_FILE"
-
-    echo "echo 'Phase={{ selected_action.phase }}'" >> "$QUEUE_FILE"
-
-    echo "hostname" >> "$QUEUE_FILE"
-
-
-    TIMEOUT=30
-
-    COUNTER=0
-
-    while [ ! -f "$RESULT_FILE" ] && [ $COUNTER -lt $((TIMEOUT * 2)) ]; do
-
-        sleep 0.5
-
-        COUNTER=$((COUNTER + 1))
-
-    done
-
-
-    if [ -f "$RESULT_FILE" ]; then
-
-        cat "$RESULT_FILE"
-
-    else
-
-        echo "Background worker orchestration tracking timeout occurred on target endpoint." && exit 1
-
-    fi
-
-  register: linux_output
-
-  when: not (is_windows | bool)
-
-  tags: engine
-
-
-- name: Parse Engine Telemetry Logs
+- name: "[WINDOWS] Bind Operational Parent PID Contexts"
 
   set_fact:
 
-    command_stdout: "{{ win_output.stdout_lines if is_windows | bool else linux_output.stdout_lines }}"
+    foothold_parent_pid: "{{ win_foothold_spawn.stdout | trim }}"
+
+  when: is_windows | bool
 
   tags: engine
 
 
 # ------------------------------------------------------------------------
 
-# SYSTEM LEDGER MATRIX LOGGING
+# DYNAMIC MITRE ATT&CK TARGET PAYLOAD INJECTION
+
+# ------------------------------------------------------------------------
+
+- name: "[WINDOWS] Inject Atomic Technique Actions into Target Worker Queue"
+
+  win_copy:
+
+    content: |
+
+      # Range Engine Atomic Technique Payload Injection Script Block
+
+      # Target Map: {{ selected_action.technique }} - {{ selected_action.name }}
+
+      Start-Process cmd.exe -ArgumentList "/c {{ selected_action.command | default('echo Simulation Activity') }}" -WindowStyle Hidden
+
+    dest: C:\ProgramData\RangeEngine\incoming.ps1
+
+  when: is_windows | bool
+
+  tags: engine
+
+
+# ------------------------------------------------------------------------
+
+# LEDGER AND SIMULATION METRICS LOGGING LAYER
 
 # ------------------------------------------------------------------------
 
@@ -319,7 +179,7 @@
 
       Phase= {{ selected_action.phase }} | Technique= {{ selected_action.technique }}
 
-      PERSISTENT_FOOTHOLD_PARENT_PID= {{ foothold_parent_pid }}
+      PERSISTENT_FOOTHOLD_PARENT_PID= {{ foothold_parent_pid | default('N/A') }}
 
       Time= {{ ansible_date_time.iso8601 }}
 
@@ -331,20 +191,57 @@
 
       /* 1. Track All Activity Originating From This Persistent Foothold Shell */
 
-      process where host.name == "{{ short_host }}" and process.parent.pid == {{ foothold_parent_pid }}
+      process where host.name == "{{ short_host }}" and process.parent.pid == {{ foothold_parent_pid | default(0) }}
 
       
 
       /* 2. Track File Lifecycle Alterations dropped by this Session */
 
-      file where host.name == "{{ short_host }}" and process.parent.pid == {{ foothold_parent_pid }} and event.action in ("creation", "modification")
+      file where host.name == "{{ short_host }}" and process.parent.pid == {{ foothold_parent_pid | default(0) }} and event.action in ("creation", "modification")
 
       
 
       /* 3. Track Network Infrastructure Callouts originating from this session */
 
-      network where host.name == "{{ short_host }}" and process.parent.pid == {{ foothold_parent_pid }}
+      network where host.name == "{{ short_host }}" and process.parent.pid == {{ foothold_parent_pid | default(0) }}
 
       ========================================================================
+
+  tags: engine
+
+
+# ------------------------------------------------------------------------
+
+# ADVANCED STOCHASTIC TIMELINE PACING MATRIX (Cryptographic Jitter Seed)
+
+# ------------------------------------------------------------------------
+
+- name: Apply Operational Stochastic Pacing Jitter Delay
+
+  pause:
+
+    seconds: >-
+
+      {% if sim_duration == 'test' %}
+
+        5
+
+      {% else %}
+
+        {% set base_map = {'30m': 1800, '24h': 86400, '72h': 259200} %}
+
+        {% set total_seconds = base_map[sim_duration] | default(0) %}
+
+        {% set host_seed = (inventory_hostname | hash('md5') | int(base=16)) % 1000 %}
+
+        {% set loop_seed = (ansible_date_time.epoch | int) % 500 %}
+
+        {% set random_factor = (((host_seed + loop_seed) * 31) % 100) / 100.0 %}
+
+        {% set calculated_delay = (total_seconds * random_factor / (ansible_play_batch | length + 1)) | int %}
+
+        {{ calculated_delay if calculated_delay > 5 else 5 }}
+
+      {% endif %}
 
   tags: engine

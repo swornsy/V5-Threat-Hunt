@@ -2,7 +2,7 @@
 
 # =======================================================================
 
-# NESTED DICTIONARY CYBER RANGE SIMULATION LAUNCHER (DURATION MODIFIED)
+# NESTED DICTIONARY CYBER RANGE SIMULATION LAUNCHER (SYNTAX HARDENED)
 
 # =======================================================================
 
@@ -78,24 +78,20 @@ echo "------------------------------------------------------------------------"
 
 for i in "${!countries[@]}"; do
 
-    echo "$((i+1))) ${countries[$i]}"
+    echo "$((i+1)) ) ${countries[$i]}"
 
 done
 
 echo "------------------------------------------------------------------------"
 
-read -p "Choose a region (1-${#countries[@]}): " country_choice
+read -p "Choose an origin region (1-${#countries[@]}): " country_choice
 
 
-if ! [[ "$country_choice" =~ ^[0-9]+$ ]] || \
+if ! [[ "$country_choice" =~ ^[0-9]+$ ]] || [ "$country_choice" -lt 1 ] || [ "$country_choice" -gt "${#countries[@]}" ]; then
 
-   [ "$country_choice" -le 0 ] || \
+    echo "[ERROR] Invalid selection fallback sequence initiated: China selected."
 
-   [ "$country_choice" -gt "${#countries[@]}" ]; then
-
-    echo "[WARN] Invalid selection, defaulting to: ${countries}"
-
-    selected_country="${countries}"
+    selected_country="China"
 
 else
 
@@ -106,121 +102,128 @@ fi
 
 # -----------------------------------------------------------------------
 
-# STEP 2: DYNAMIC ACTOR SELECTION FOR SPECIFIC COUNTRY
+# STEP 2: DYNAMIC ADVANCED PERSISTENT THREAT (APT) SELECTION
 
 # -----------------------------------------------------------------------
 
 echo ""
 
-echo "[*] Querying threat intelligence footprints for [ $selected_country ]..."
-
-echo "------------------------------------------------------------------------"
+echo "[*] Parsing available profiles associated with $selected_country..."
 
 
-mapfile -t actors < <(python3 -c "
+# Export selected country to environment to prevent python string breakout bugs
 
-import yaml
+export SELECTED_COUNTRY="$selected_country"
 
-with open('$CATALOG', 'r') as f:
+export CATALOG_PATH="$CATALOG"
 
-    data = yaml.load(f, Loader=yaml.SafeLoader)
 
-catalog_root = data.get('apt_catalog', {})
+actors_json=$(python3 -c "
 
-actors_list = catalog_root.get('$selected_country', [])
+import yaml, json, sys, os
 
-for actor in actors_list:
+try:
 
-    if isinstance(actor, dict):
+    with open(os.environ['CATALOG_PATH'], 'r') as f:
 
-        name = actor.get('name', 'Unknown')
+        data = yaml.load(f, Loader=yaml.SafeLoader)
 
-        aid = actor.get('id', 'G0000')
+    actors = data.get('apt_catalog', {}).get(os.environ['SELECTED_COUNTRY'], [])
 
-        print(f'{name}|{aid}')
+    print(json.dumps(actors))
+
+except Exception:
+
+    sys.exit(1)
 
 ")
 
 
-if [ ${#actors[@]} -eq 0 ]; then
+if [ -z "$actors_json" ] || [ "$actors_json" == "[]" ]; then
 
-    if [ "$selected_country" = "China" ]; then
+    echo "[ERROR] No structural threat groups tracked for $selected_country."
 
-        actors=("admin@338|G0018" "Aoqin Dragon|G1007" "APT1|G0006")
-
-    else
-
-        actors=("Default Actor|G0000")
-
-    fi
+    exit 1
 
 fi
 
 
-for i in "${!actors[@]}"; do
+echo ""
 
-    actor_name=$(echo "${actors[$i]}" | cut -d'|' -f1)
-
-    actor_id=$(echo "${actors[$i]}" | cut -d'|' -f2)
-
-    echo "$((i+1))) $actor_name ($actor_id)"
-
-done
-
+echo "Select Target Threat Profile Engine:"
 
 echo "------------------------------------------------------------------------"
 
-read -p "Select threat profile to emulate (1-${#actors[@]}): " actor_choice
+# Export raw JSON data array directly to env context safely
+
+export ACTORS_JSON_DATA="$actors_json"
 
 
-if ! [[ "$actor_choice" =~ ^[0-9]+$ ]] || \
+python3 -c "
 
-   [ "$actor_choice" -le 0 ] || \
+import json, os
 
-   [ "$actor_choice" -gt "${#actors[@]}" ]; then
+actors = json.loads(os.environ['ACTORS_JSON_DATA'])
 
-    echo "[WARN] Invalid selection, defaulting to: ${actors}"
+for idx, actor in enumerate(actors):
 
-    target_actor="${actors}"
+    print(f'{idx+1}) {actor[\"name\"]} ({actor[\"id\"]})')
 
-else
+"
 
-    target_actor="${actors[$((actor_choice-1))]}"
+echo "------------------------------------------------------------------------"
+
+read -p "Select threat profile element: " actor_choice
+
+
+total_actors=$(python3 -c "import json, os; print(len(json.loads(os.environ['ACTORS_JSON_DATA'])))")
+
+
+if ! [[ "$actor_choice" =~ ^[0-9]+$ ]] || [ "$actor_choice" -lt 1 ] || [ "$actor_choice" -gt "$total_actors" ]; then
+
+    echo "[ERROR] Out of bounds. Extracting default operational matrix placeholder..."
+
+    actor_choice=1
 
 fi
 
 
-actor_name=$(echo "$target_actor" | cut -d'|' -f1)
+export ACTOR_CHOICE_INDEX="$actor_choice"
 
-actor_id=$(echo "$target_actor" | cut -d'|' -f2)
+
+# RESOLVED: Pull attributes individually out of Python to eliminate IFS pipe splitting bugs
+
+actor_name=$(python3 -c "import json, os;   actors = json.loads(os.environ['ACTORS_JSON_DATA']); choice = int(os.environ['ACTOR_CHOICE_INDEX']) - 1; print(actors[choice]['name'])")
+
+actor_id=$(python3 -c "import json, os;     actors = json.loads(os.environ['ACTORS_JSON_DATA']); choice = int(os.environ['ACTOR_CHOICE_INDEX']) - 1; print(actors[choice]['id'])")
 
 
 # -----------------------------------------------------------------------
 
-# STEP 3: SELECT SIMULATION RUNTIME DURATION
+# STEP 3: TIMING WINDOW MATRIX DEFINITION
 
 # -----------------------------------------------------------------------
 
 echo ""
 
-echo "[*] Select Total Attack Operation Duration Window:"
+echo "Select Campaign Timeline Profile Window:"
 
 echo "------------------------------------------------------------------------"
 
-echo "1) Test Mode (Immediate sequential execution for verification)"
+echo "1) Test Mode (Instant execution verification - 5s Checkpoint)"
 
-echo "2) 30 Minutes (Even spacing with dynamic scheduling delays)"
+echo "2) 30 Minutes (Short compressed live evaluation run)"
 
-echo "3) 24 Hours   (Strategic long-form dwell testing)"
+echo "3) 24 Hours (Full day persistent training window)"
 
-echo "4) 72 Hours   (Advanced validation cycle)"
+echo "4) 72 Hours (Advanced multi-day continuous hunt window)"
 
 echo "------------------------------------------------------------------------"
 
-read -p "Choose a timeline length (1-4): " duration_choice
+read -p "Choose window speed (1-4): " time_choice
 
 
-case $duration_choice in
+case $time_choice in
 
     1) sim_duration="test" ;;
 
@@ -237,13 +240,13 @@ esac
 
 # -----------------------------------------------------------------------
 
-# STEP 4: ATTACK PROFILE BEHAVIOR NOISE LEVEL (PRIORITIZATION ENGINE)
+# STEP 4: OPERATIONAL WEIGHED NOISE BEHAVIOR SELECTION
 
 # -----------------------------------------------------------------------
 
 echo ""
 
-echo "[*] Select Preferred Technique Footprint Preference:"
+echo "Select Campaign Opsec Profile Behavior:"
 
 echo "------------------------------------------------------------------------"
 
@@ -306,12 +309,6 @@ echo "[*] Handing configuration targets off to Ansible Automation Engine..."
 echo ""
 
 
-ansible-playbook -i inventory/hosts.ini site.yml -e \
+# RESOLVED: Variables securely isolated within outer double quotes and inner single quotes
 
-  "selected_actor_name='${actor_name}' \
-
-   selected_actor_id='${actor_id}' \
-
-   sim_duration='${sim_duration}' \
-
-   attack_behaviour='${attack_behaviour}'"
+ansible-playbook -i inventory/hosts.ini site.yml -e "selected_actor_name='${actor_name}' selected_actor_id='${actor_id}' sim_duration='${sim_duration}' attack_behaviour='${attack_behaviour}'"

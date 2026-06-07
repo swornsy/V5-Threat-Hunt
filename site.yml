@@ -1,5 +1,11 @@
 ---
 
+# ========================================================================
+
+# V5 THREAT HUNT CYBER RANGE MASTER ORCHESTRATION PROFILE (site.yml)
+
+# ========================================================================
+
 
 - name: V5 Threat Hunt Adversary Emulation Engine (Testable Build)
 
@@ -223,8 +229,42 @@
 
     - engine
 
+
+  # ==========================================================
+
+  # ✅ POST-EXECUTION CONTROL LAYER
+
+  # ==========================================================
+
   post_tasks:
 
+    - name: Maintain Lab Environment Baseline Window (Sustain Background Noise)
+
+      pause:
+
+        minutes: "{{
+
+          0 if sim_duration == 'test' else
+
+          30 if sim_duration == '30m' else
+
+          1440 if sim_duration == '24h' else
+
+          4320 if sim_duration == '72h'
+
+        }}"
+
+      when: sim_duration != 'test'
+
+      delegate_to: localhost
+
+      run_once: true
+
+      tags: always
+
+
     - name: Trigger Post-Campaign Cyber Range Evacuation
+
       include_tasks: roles/engine/tasks/cleanup.yml
+
       tags: always

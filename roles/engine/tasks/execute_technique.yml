@@ -2,246 +2,310 @@
 
 # ========================================================================
 
-# MULTI-OS STATEFUL PROCESS ENGINE - DECOUPLED PROCESS LINEAGE (execute_technique.yml)
+# PRE-EXECUTION SCOPING: SAFE PRIMITIVE LOOKUP & DEFENSIVE GUARDS
 
 # ========================================================================
 
+- name: Resolve Atomic Primitive Key from Mapping Context
 
-- name: Establish Cross-Platform Host Environment Variables
+  ansible.builtin.set_fact:
 
-  set_fact:
+    primitive_key: >-
 
-    is_windows: "{{ ansible_os_family == 'Windows' }}"
+      {{
 
-    short_host: "{{ inventory_hostname | split('.') | first }}"
+        (
 
-  tags: engine
+          mitre_mappings.mapping[current_step.technique.strip()].primitive
+
+          if (
+
+            mitre_mappings is defined and 
+
+            mitre_mappings.mapping is defined and 
+
+            current_step.technique.strip() in mitre_mappings.mapping
+
+          )
+
+          else
+
+          mitre_mappings.mapping[current_step.technique.strip().split('.')].primitive
+
+          if (
+
+            mitre_mappings is defined and 
+
+            mitre_mappings.mapping is defined and 
+
+            current_step.technique.strip().split('.') in mitre_mappings.mapping
+
+          )
+
+          else none
+
+        )
+
+      }}
+
+  tags: always
 
 
-# ------------------------------------------------------------------------
+- name: Verify and Audit Primitive Mapping Resolution
 
-# DETACHED FORENSIC WORKER ASSURANCE LOOP
+  ansible.builtin.debug:
 
-# ------------------------------------------------------------------------
+    msg:
 
-- name: "[WINDOWS] Enforce RangeEngine Target Runtime Directory"
+      - "Technique Context:   {{ current_step.technique }}"
 
-  win_file:
+      - "Resolved Primitive:  {{ primitive_key | default('NOT FOUND', true) }}"
 
-    path: C:\ProgramData\RangeEngine
+      - "Loaded Variants:     {{ atomic_primitives.primitives[primitive_key].variants | length if (atomic_primitives is defined and primitive_key is not none and primitive_key in atomic_primitives.primitives) else 0 }}"
+
+  tags: always
+
+
+- name: Fail if Primitive Mapping is Missing (Calibration Safeguard)
+
+  ansible.builtin.fail:
+
+    msg: >-
+
+      FATAL LOOKUP ERROR: Technique [{{ current_step.technique }}] could not be translated to an atomic primitive. 
+
+      Verify that 'mitre_mappings.mapping' contains this key or its base technique.
+
+  when: >
+
+    primitive_key is none or 
+
+    primitive_key | string | length == 0
+
+  tags: always
+
+
+# ========================================================================
+
+# DEBUGGER: TELEMETRY AUDIT FOR RANGE CONDITIONALS
+
+# ========================================================================
+
+- name: "DEBUGGER: Audit Range Logic for {{ current_step.technique }}"
+
+  ansible.builtin.debug:
+
+    msg:
+
+      - "Target Host:          {{ inventory_hostname }}"
+
+      - "Technique running:     {{ current_step.technique }}"
+
+      - "Resolved Primitive:    {{ primitive_key }}"
+
+      - "Current Step Stealth:  {{ current_step.stealth | lower }}"
+
+      - "Global OpSec Target:   {{ attack_behaviour | lower }}"
+
+      - "Test Single Tech Flag: {{ test_single_technique }} (Target ID: {{ test_technique_id | default('None') }})"
+
+      - "Test Single Phase Flag:{{ test_single_phase }} (Target Phase: {{ test_phase_name | default('None') }})"
+
+  tags: always
+
+
+# ========================================================================
+
+# PRE-STAGE OPERATIONS
+
+# ========================================================================
+
+- name: Ensure Target Spooling Queue Folder Architecture Exists
+
+  ansible.windows.win_file:
+
+    path: C:\ProgramData\RangeEngine\Queue
 
     state: directory
 
-  when: is_windows | bool
-
-  tags: engine
+  tags: always
 
 
-- name: "[WINDOWS] Bootstrap Persistent Background Foothold Engine"
+# ========================================================================
 
-  win_copy:
+# TASK 1: STAGE/COMPILE THE ADVERSARIAL ARTIFACT
 
-    src: worker.ps1
+# ========================================================================
 
-    dest: C:\ProgramData\RangeEngine\worker.ps1
+- name: Stage Compiled Adversarial Script to Local Worker Queue
 
-  when: is_windows | bool
+  ansible.windows.win_copy:
 
-  tags: engine
-
-
-- name: "[WINDOWS] Start Hidden Detached User-Space Worker via WMI Engine"
-
-  win_shell: |
-
-    $WorkDir = "C:\ProgramData\RangeEngine"
-
-    $Path = "$WorkDir\\worker.ps1"
-
-    $LockFile = "$WorkDir\\worker.lock"
-
-    
-
-    $NeedsStart = $true
-
-    if (Test-Path $LockFile) {
-
-        $SavedPID = (Get-Content $LockFile -Raw).Trim()
-
-        $Proc = Get-Process -Id $SavedPID -ErrorAction SilentlyContinue
-
-        if ($Proc -and $Proc.ProcessName -eq "powershell") {
-
-            $NeedsStart = $false
-
-        }
-
-    }
-
-    
-
-    if ($NeedsStart) {
-
-        Remove-Item $LockFile -Force -ErrorAction SilentlyContinue
-
-        # Spawn completely detached from WinRM parent process session constraints
-
-        Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
-
-            CommandLine = "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File $Path"
-
-        } | Out-Null
-
-        Start-Sleep -Seconds 2
-
-    }
-
-    
-
-    if (Test-Path $LockFile) {
-
-        return (Get-Content $LockFile -Raw).Trim()
-
-    } else {
-
-        throw "Failed to capture operational process foothold PID context"
-
-    }
-
-  register: win_foothold_spawn
-
-  when: is_windows | bool
-
-  tags: engine
-
-
-- name: "[WINDOWS] Bind Operational Parent PID Contexts"
-
-  set_fact:
-
-    foothold_parent_pid: "{{ win_foothold_spawn.stdout | trim }}"
-
-  when: is_windows | bool
-
-  tags: engine
-
-
-# ------------------------------------------------------------------------
-
-# DYNAMIC MITRE ATT&CK TARGET PAYLOAD INJECTION
-
-# ------------------------------------------------------------------------
-
-- name: "[WINDOWS] Inject Atomic Technique Actions into Target Worker Queue"
-
-  win_copy:
+    dest: "C:\\ProgramData\\RangeEngine\\Queue\\{{ current_step.technique }}_{{ variant_item.name }}.ps1"
 
     content: |
 
-      # Range Engine Atomic Technique Payload Injection Script Block
+      # ========================================================================
 
-      # Target Map: {{ selected_action.technique }} - {{ selected_action.name }}
+      # ATOMIC PRIMITIVE ARTIFACT (Target Execution Context)
 
-      Start-Process cmd.exe -ArgumentList "/c {{ selected_action.command | default('echo Simulation Activity') }}" -WindowStyle Hidden
+      # Generated: {{ ansible_date_time.iso8601 }}
 
-    dest: C:\ProgramData\RangeEngine\incoming.ps1
+      # MITRE ATT&CK: {{ current_step.technique }} - {{ current_step.name | default('Unnamed') }}
 
-  when: is_windows | bool
-
-  tags: engine
+      # ========================================================================
 
 
-# ------------------------------------------------------------------------
+      # Load localized environment memory layers
 
-# LEDGER AND SIMULATION METRICS LOGGING LAYER
+      if (Test-Path "C:\ProgramData\RangeEngine\state.ps1") { . "C:\ProgramData\RangeEngine\state.ps1" }
 
-# ------------------------------------------------------------------------
 
-- name: Write Unified Stateful Process Activity Logs to Ledger
+      # Re-hydrate structural session boundaries injected by Ansible Orchestration
 
-  delegate_to: localhost
+      [string[]]$TARGETS = @(
 
-  lineinfile:
+      {% for target in target_ips %}
 
-    path: /tmp/adversary_activity.log
+      "{{ target }}"{% if not loop.last %},{% endif %}
 
-    create: yes
+      {% endfor %}
 
-    insertafter: EOF
+      )
 
-    line: |
 
-      ========================================================================
+      $USER = "{{ ansible_user }}"
 
-      [STATEFUL ATTACK TIMELINE EVENT]
+      $PASS = '{{ ansible_password | replace("'", "''") }}'
 
-      Host= {{ short_host }} | OS_Platform= {{ ansible_os_family }}
 
-      Phase= {{ selected_action.phase }} | Technique= {{ selected_action.technique }}
+      # Execute variant code block primitive
 
-      PERSISTENT_FOOTHOLD_PARENT_PID= {{ foothold_parent_pid | default('N/A') }}
+      {{ variant_item.script | indent(6, first=false) }}
 
-      Time= {{ ansible_date_time.iso8601 }}
+    force: yes
 
-      ------------------------------------------------------------------------
+  vars:
 
-      [SIEM INVESTIGATION HINTS - TARGET TELEMETRY LOOKUPS (ESC / EQL)]
+    target_ips: "{{ groups['windows'] | default([inventory_hostname]) | map('extract', hostvars, ['ansible_host']) | list }}"
+
+  loop: "{{ atomic_primitives.primitives[primitive_key].variants | default([]) }}"
+
+  loop_control:
+
+    loop_var: variant_item
+
+    label: "Staging -> {{ current_step.technique }} | Variant: {{ variant_item.name }}"
+
+  when:
+
+    - primitive_key is not none
+
+    - primitive_key | string | length > 0
+
+    - (attack_behaviour == 'mixed') or (current_step.stealth | lower == attack_behaviour | lower)
+
+    - (not test_single_technique) or (current_step.technique | lower == test_technique_id | lower)
+
+    - (not test_single_phase) or (current_step.phase | lower == test_phase_name | lower)
+
+    - variant_item.name | lower != 'poison_pill'
+
+  tags: always
+
+
+# ========================================================================
+
+# TASK 2: EXECUTION LAYER & POISON PILL SANITIZATION
+
+# ========================================================================
+
+- name: Execute Variant Worker Layer or Fire Poison Pill Sanctuary
+
+  ansible.windows.win_powershell:
+
+    script: |
+
+      $ErrorActionPreference = "Stop"
+
+      $EngineRoot = "C:\ProgramData\RangeEngine"
+
+      $QueueFolder = "$EngineRoot\Queue"
+
+
+      # --------------------------------------------------------------------
+
+      # CONDITION: HANDLE POISON PILL (CLEANUP TRIGGER)
+
+      # --------------------------------------------------------------------
+
+      if ("{{ variant_item.name | lower }}" -eq "poison_pill") {
+
+          Write-Output "[Execution Engine] Poison Pill detected! Sanitizing queue folder..."
+
+          if (Test-Path $QueueFolder) {
+
+              Remove-Item -Path "$QueueFolder\*" -Include "*.ps1" -Force -ErrorAction SilentlyContinue
+
+          }
+
+          $Ansible.Changed = $true
+
+          Exit 0
+
+      }
+
+
+      # --------------------------------------------------------------------
+
+      # RUN STAGED TECHNIQUE ARTIFACT
+
+      # --------------------------------------------------------------------
+
+      $ScriptPath = "$QueueFolder\{{ current_step.technique }}_{{ variant_item.name }}.ps1"
 
       
 
-      /* 1. Track All Activity Originating From This Persistent Foothold Shell */
+      if (Test-Path $ScriptPath) {
 
-      process where host.name == "{{ short_host }}" and process.parent.pid == {{ foothold_parent_pid | default(0) }}
+          Write-Output "[Execution Engine] Spooling Task (Technique: {{ current_step.technique }} | Variant: {{ variant_item.name }})"
 
-      
+          & $ScriptPath
 
-      /* 2. Track File Lifecycle Alterations dropped by this Session */
+          $Ansible.Changed = $true
 
-      file where host.name == "{{ short_host }}" and process.parent.pid == {{ foothold_parent_pid | default(0) }} and event.action in ("creation", "modification")
+      } else {
 
-      
+          Write-Error "[Execution Engine] Expected staged primitive file was missing: $ScriptPath"
 
-      /* 3. Track Network Infrastructure Callouts originating from this session */
+      }
 
-      network where host.name == "{{ short_host }}" and process.parent.pid == {{ foothold_parent_pid | default(0) }}
+  vars:
 
-      ========================================================================
+    target_ips: "{{ groups['windows'] | default([inventory_hostname]) | map('extract', hostvars, ['ansible_host']) | list }}"
 
-  tags: engine
+  loop: "{{ atomic_primitives.primitives[primitive_key].variants | default([]) }}"
 
+  loop_control:
 
-# ------------------------------------------------------------------------
+    loop_var: variant_item
 
-# ADVANCED STOCHASTIC TIMELINE PACING MATRIX (Cryptographic Jitter Seed)
+    label: "Running -> {{ current_step.technique }} | Variant: {{ variant_item.name }}"
 
-# ------------------------------------------------------------------------
+  register: variant_execution_results
 
-- name: Apply Operational Stochastic Pacing Jitter Delay
+  when:
 
-  pause:
+    - primitive_key is not none
 
-    seconds: >-
+    - primitive_key | string | length > 0
 
-      {% if sim_duration == 'test' %}
+    - (attack_behaviour == 'mixed') or (current_step.stealth | lower == attack_behaviour | lower)
 
-        5
+    - (not test_single_technique) or (current_step.technique | lower == test_technique_id | lower)
 
-      {% else %}
+    - (not test_single_phase) or (current_step.phase | lower == test_phase_name | lower)
 
-        {% set base_map = {'30m': 1800, '24h': 86400, '72h': 259200} %}
+  ignore_errors: yes
 
-        {% set total_seconds = base_map[sim_duration] | default(0) %}
-
-        {% set host_seed = (inventory_hostname | hash('md5') | int(base=16)) % 1000 %}
-
-        {% set loop_seed = (ansible_date_time.epoch | int) % 500 %}
-
-        {% set random_factor = (((host_seed + loop_seed) * 31) % 100) / 100.0 %}
-
-        {% set calculated_delay = (total_seconds * random_factor / (ansible_play_batch | length + 1)) | int %}
-
-        {{ calculated_delay if calculated_delay > 5 else 5 }}
-
-      {% endif %}
-
-  tags: engine
+  tags: always

@@ -1,0 +1,168 @@
+---
+
+# vars/mitre_mapping.yml
+
+mapping:
+
+  # === Execution ===
+
+  T1059:
+
+    primitive: exec_shell
+
+  T1059.001:
+
+    primitive: exec_powershell
+
+  T1059.003:
+
+    primitive: exec_cmd
+
+  T1059.005:
+
+    primitive: exec_vbscript
+
+  T1106:
+
+    primitive: native_api
+
+  T1569.002:
+
+    primitive: service_execution
+
+
+  # === Persistence ===
+
+  T1053.005:
+
+    primitive: scheduled_task
+
+  T1547.001:
+
+    primitive: autorun_registry
+
+  T1112:
+
+    primitive: registry_modification
+
+
+  # === Privilege Escalation ===
+
+  T1548.002:
+
+    primitive: uac_bypass
+
+  T1055.012:
+
+    primitive: process_injection
+
+
+  # === Discovery ===
+
+  T1033:
+
+    primitive: host_discovery
+
+  T1082:
+
+    primitive: host_discovery
+
+  T1057:
+
+    primitive: process_discovery
+
+  T1083:
+
+    primitive: file_discovery
+
+  T1016:
+
+    primitive: network_discovery
+
+  T1018:
+
+    primitive: network_discovery
+
+  T1046:
+
+    primitive: network_discovery
+
+  T1087.002:
+
+    primitive: account_discovery
+
+
+  # === Credential Access ===
+
+  T1555:
+
+    primitive: credential_access
+
+  T1555.003:
+
+    primitive: browser_credential_access
+
+  T1003.001:
+
+    primitive: lsass_access
+
+  T1003.002:
+
+    primitive: sam_access
+
+  T1110:
+
+    primitive: password_attack
+
+  T1558:
+
+    primitive: kerberos_interaction
+
+
+  # === Lateral Movement ===
+
+  T1021.001:
+
+    primitive: lateral_rdp
+
+  T1021.002:
+
+    primitive: lateral_smb
+
+  T1047:
+
+    primitive: lateral_wmi
+
+
+  # === Collection & Exfiltration ===
+
+  T1005:
+
+    primitive: data_collection
+
+  T1074.001:
+
+    primitive: stage_data
+
+  T1560:
+
+    primitive: archive_data
+
+  T1041:
+
+    primitive: exfiltration
+
+
+  # === Defense Evasion ===
+
+  T1027.001:
+
+    primitive: obfuscation
+
+  T1036.005:
+
+    primitive: masquerading
+
+  T1070.004:
+
+    primitive: cleanup

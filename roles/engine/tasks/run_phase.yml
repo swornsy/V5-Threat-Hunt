@@ -1,202 +1,189 @@
 ---
 
-# ========================================================================
+# ============================================================
 
-# DIAGNOSTIC RUN - CYBER RANGE ENGINE
+# PHASE NORMALIZATION
 
-# ========================================================================
-
-
-- name: FORCE DIAGNOSTIC DUMP
-
-  debug:
-
-    msg: 
-
-      - "=== HOST IDENTIFICATION ==="
-
-      - "Current inventory_hostname: {{ inventory_hostname }}"
-
-      - "Master Loop Phase: {{ master_loop_phase | default('UNDEFINED') }}"
-
-      - "=== COMPROMISE MATCHING ==="
-
-      - "Is Host Compromised: {{ (inventory_hostname | split('.') | first | lower | trim) in (hostvars['localhost']['compromised_hosts'] | default([]) | map('split', '.') | map('first') | map('lower') | map('trim') | list) }}"
-
-      - "Localhost Compromised List: {{ hostvars['localhost']['compromised_hosts'] | default('NOT FOUND') }}"
-
-      - "=== SOURCE DATA ==="
-
-      - "Attack Sequence Count: {{ attack_sequence | default([]) | length }}"
-
-      - "Global Techniques Baseline: {{ global_techniques | default([]) }}"
-
-  tags: engine
+# ============================================================
 
 
 - name: Normalize phase formatting strings
 
   set_fact:
 
-    normalized_phase: "{{ master_loop_phase | string | trim | lower | replace('_', '-') }}"
+    normalized_phase: "{{ master_loop_phase | lower | trim }}"
 
-    phase_fact_safe: "{{ master_loop_phase | string | trim | lower | replace('-', '_') }}"
+    phase_fact_safe: "{{ master_loop_phase | lower | replace('-', '_') }}"
 
-  tags: engine
+
+
+# ============================================================
+
+# COMPROMISE CHECK
+
+# ============================================================
 
 
 - name: Evaluate Host Foothold Compromise Status
 
   set_fact:
 
-    is_compromised: "{{ (inventory_hostname | split('.') | first | lower | trim) in (hostvars['localhost']['compromised_hosts'] | default([]) | map('split', '.') | map('first') | map('lower') | map('trim') | list) }}"
-
-  tags: engine
+    is_compromised: "{{ inventory_hostname in hostvars['localhost']['compromised_hosts'] | default([]) }}"
 
 
-# ------------------------------------------------------------------------
 
-# STEP 3: NATIVE TARGET EXTRACTION
+# ============================================================
 
-# ------------------------------------------------------------------------
+# PREVENT RE-RUNNING SAME PHASE
 
-- name: Extract Raw Threat Actor Techniques matching current phase string
-
-  set_fact:
-
-    raw_extracted_techniques: "{{ attack_sequence | default([]) | selectattr('phase', 'equalto', normalized_phase) | list }}"
-
-  tags: engine
+# ============================================================
 
 
-- name: Fallback to Global Baseline Pool if Actor Phase is Empty
+- name: Check if phase already completed
 
   set_fact:
 
-    raw_extracted_techniques: "{{ global_techniques | default([]) }}"
+    phase_already_done: "{{ hostvars[inventory_hostname]['phase_done_' + phase_fact_safe] | default(false) }}"
+
+
+
+# ============================================================
+
+# EXTRACT TECHNIQUES
+
+# ============================================================
+
+
+- name: Extract techniques for phase
+
+  set_fact:
+
+    raw_extracted_techniques: "{{ attack_sequence | selectattr('phase', 'equalto', normalized_phase) | list }}"
+
+
+
+# ✅ FORCE FALLBACK (ENSURES ALL PHASES EXECUTE)
+
+- name: Fallback to guaranteed technique
+
+  set_fact:
+
+    raw_extracted_techniques: >-
+
+      {{
+
+        [
+
+          {
+
+            'technique': 'T0000-' + normalized_phase,
+
+            'name': 'Fallback Technique',
+
+            'phase': normalized_phase,
+
+            'command': 'echo Fallback Execution'
+
+          }
+
+        ]
+
+      }}
 
   when: raw_extracted_techniques | length == 0
 
-  tags: engine
 
 
-# ------------------------------------------------------------------------
+# ============================================================
 
-# STEP 4: BULLETPROOF OBJECT CONVERSION
+# CLEAN NORMALIZATION
 
-# ------------------------------------------------------------------------
-
-- name: Structurally Standardize All Sourced Elements into Rich Profiles
-
-  set_fact:
-
-    normalized_phase_objects: >-
-
-      {% set parsed = [] %}
-
-      {% for item in raw_extracted_techniques %}
-
-        {% if item is mapping and item.technique is defined %}
-
-          {% set _ = parsed.append(item) %}
-
-        {% else %}
-
-          {% set technique_id = item.technique | default(item.id) | default(item) | string | trim %}
-
-          {% if technique_id | length > 0 %}
-
-            {% set _ = parsed.append({'technique': technique_id, 'name': 'Cyber Range Standard Profile', 'phase': normalized_phase, 'command': 'echo Running Blueprint ' + technique_id}) %}
-
-          {% endif %}
-
-        {% endif %}
-
-      {% endfor %}
-
-      {{ parsed }}
-
-  tags: engine
+# ============================================================
 
 
-- name: Calculate Phase Execution Eligibility
+- name: Keep only valid technique objects
 
   set_fact:
 
-    should_run_phase: "{{ is_compromised | bool and (normalized_phase_objects | from_yaml | length > 0) and not (hostvars[inventory_hostname]['phase_done_' + phase_fact_safe] | default(false)) }}"
+    normalized_phase_objects: "{{ raw_extracted_techniques
 
-  tags: engine
+                                  | select('mapping')
 
+                                  | selectattr('technique','defined')
 
-# ------------------------------------------------------------------------
-
-# STEP 5: FIXED ATTACK LAYOUT SELECTION
-
-# ------------------------------------------------------------------------
-
-- name: Establish Dynamic Baseline Selection Window Limits
-
-  set_fact:
-
-    selected_count: "{{ 1 if test_single_technique | bool else [1, (normalized_phase_objects | from_yaml | length)] | min }}"
-
-  when: should_run_phase | bool
-
-  tags: engine
+                                  | list }}"
 
 
-- name: Finalize Randomized Strategy Execution Layout
+
+# ============================================================
+
+# EXECUTION CONDITION
+
+# ============================================================
+
+
+- name: Determine if phase should run
 
   set_fact:
 
-    local_execution_queue: "{{ (normalized_phase_objects | from_yaml | shuffle)[0:(selected_count | int)] }}"
+    should_run_phase: "{{ is_compromised
 
-    "selection_done_{{ phase_fact_safe }}": true
+                          and (normalized_phase_objects | length > 0)
 
-  when: 
-
-    - should_run_phase | bool
-
-    - hostvars[inventory_hostname]['selection_done_' + phase_fact_safe] is not defined
-
-  tags: engine
+                          and not phase_already_done }}"
 
 
-# ------------------------------------------------------------------------
 
-# STEP 6: EXECUTION LIFT
+# ============================================================
 
-# ------------------------------------------------------------------------
+# SELECT EXACTLY ONE TECHNIQUE
+
+# ============================================================
+
+
+- name: Select exactly one technique
+
+  set_fact:
+
+    local_execution_queue: "{{ [ (normalized_phase_objects | shuffle | first) ] }}"
+
+  when: should_run_phase
+
+
+
+# ============================================================
+
+# EXECUTE
+
+# ============================================================
+
 
 - name: Execute Cyber Range Techniques
 
   include_tasks: execute_technique.yml
 
-  vars:
-
-    selected_action: "{{ action_item }}"
-
   loop: "{{ local_execution_queue | default([]) }}"
 
   loop_control:
 
-    loop_var: action_item
+    loop_var: selected_action
 
-  when:
-
-    - should_run_phase | bool
-
-    - local_execution_queue | length > 0
-
-  tags: engine
+  when: should_run_phase
 
 
-- name: Mark phase as completed
+
+# ============================================================
+
+# MARK PHASE COMPLETE
+
+# ============================================================
+
+
+- name: Mark phase complete
 
   set_fact:
 
     "phase_done_{{ phase_fact_safe }}": true
 
-  when: is_compromised | bool
+  when: should_run_phase
 
-  tags: engine

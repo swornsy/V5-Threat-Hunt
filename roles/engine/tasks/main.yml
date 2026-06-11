@@ -2,43 +2,81 @@
 
 # ========================================================================
 
-# CYBER RANGE ENGINE - MAIN ENTRYPOINT (roles/engine/tasks/main.yml)
+# V5 THREAT HUNT ENGINE CORE EXECUTION ENGINE (roles/engine/tasks/main.yml)
 
 # ========================================================================
 
 
-- name: Execute Cyber Range Campaign Across MITRE ATT&CK Phases
+- name: Import Atomic Simulation Script Definitions
 
-  include_tasks: run_phase.yml
+  include_vars:
 
-  loop:
+    file: "vars/primitives.yml"
 
-    - reconnaissance
+    name: atomic_primitives
 
-    - resource-development
+  tags: always
 
-    - initial-access
 
-    - execution
+- name: Import MITRE ATT&CK Technique Mapping Rules
 
-    - persistence
+  include_vars:
 
-    - privilege-escalation
+    file: "vars/mitre_mapping.yml"
 
-    - defense-evasion
+    name: mitre_mappings
 
-    - credential-access
+  tags: always
 
-    - discovery
 
-    - lateral-movement
+# --------------------------------------------------------------------
 
-    - command-and-control
+# STAGE ENVIRONMENT: Deploy local state engine tracking mechanics
 
-    - exfiltration
+# --------------------------------------------------------------------
 
-    - impact
+- name: Ensure RangeEngine Root Directory Exists on Target
+
+  ansible.windows.win_file:
+
+    path: C:\ProgramData\RangeEngine
+
+    state: directory
+
+  when: inventory_hostname == hostvars['localhost']['patient_zero_host']
+
+
+- name: Deploy Local State Machine Core Script (state.ps1)
+
+  ansible.windows.win_copy:
+
+    src: files/state.ps1
+
+    dest: C:\ProgramData\RangeEngine\state.ps1
+
+  when: inventory_hostname == hostvars['localhost']['patient_zero_host']
+
+
+# --------------------------------------------------------------------
+
+# EXECUTION LOOP
+
+# --------------------------------------------------------------------
+
+- name: Process Campaign Adversary Execution Sequence Loop
+
+  include_tasks: execute_technique.yml
+
+  vars:
+
+    target_ips: "{{ hostvars['localhost']['allowed_downstream_targets'] | map('extract', hostvars, ['ansible_host']) | list }}"
+
+  loop: "{{ attack_sequence }}"
 
   loop_control:
 
-    loop_var: master_loop_phase
+    loop_var: current_step
+
+  when: inventory_hostname == hostvars['localhost']['patient_zero_host']
+
+  tags: always

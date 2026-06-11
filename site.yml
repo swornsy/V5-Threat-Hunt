@@ -1,270 +1,398 @@
 ---
 
+
 # ========================================================================
+
 
 # V5 THREAT HUNT CYBER RANGE MASTER ORCHESTRATION PROFILE (site.yml)
 
+
 # ========================================================================
+
 
 
 - name: V5 Threat Hunt Adversary Emulation Engine (Testable Build)
 
+
   hosts: windows
+
 
   gather_facts: yes
 
 
+
   vars:
+
 
     # Default test switches
 
+
     test_single_phase: false
+
 
     test_phase_name: "execution"
 
+
     test_single_technique: false
+
 
     test_technique_id: "t1059.001"
 
 
+
   pre_tasks:
 
+
     # ==========================================================
+
 
     # ✅ SEED GLOBAL ORCHESTRATION PHASES VIA FACTS
 
+
     # ==========================================================
+
 
     - name: Initialize Global Cyber Range ATT&CK Phases
 
+
       set_fact:
+
 
         valid_phases:
 
+
           - reconnaissance
+
 
           - initial-access
 
+
           - execution
+
 
           - persistence
 
+
           - privilege-escalation
+
 
           - defense-evasion
 
+
           - credential-access
+
 
           - discovery
 
+
           - lateral-movement
+
 
           - collection
 
+
           - command-and-control
+
 
           - exfiltration
 
+
           - impact
+
 
       tags: always
 
 
+
     # ==========================================================
+
 
     # ✅ LOAD MATRIX (ALWAYS)
 
+
     # ==========================================================
+
 
     - name: Load attack matrix
 
+
       include_vars:
+
 
         file: "vars/mitre_attack_matrix.yml"
 
+
         name: raw_matrix
+
 
       delegate_to: localhost
 
+
       run_once: true
+
 
       tags: always
 
 
+
     # ==========================================================
+
 
     # ✅ PARSE AND FLATTEN CAMPAIGN MATRIX NATIVELY ON ALL HOSTS
 
+
     # ==========================================================
+
 
     - name: Parse and Flatten Target Attack Sequence Array
 
+
       set_fact:
+
 
         attack_sequence: >-
 
+
           {% set target_actor = selected_actor_id | default('G0016') %}
+
 
           {% set actor_data = raw_matrix['attack_matrix'][target_actor] | default({}) %}
 
+
           {% set processed_list = [] %}
+
 
           {% for phase_name, actions in actor_data.items() %}
 
+
             {% if actions is iterable and actions is not string and actions is not mapping %}
+
 
               {% for action in actions %}
 
+
                 {% if action is mapping and action.technique is defined %}
+
 
                   {% set action_copy = action.copy() %}
 
+
                   {% set _ = action_copy.update({'phase': phase_name | string}) %}
+
 
                   {% set _ = processed_list.append(action_copy) %}
 
+
                 {% endif %}
+
 
               {% endfor %}
 
+
             {% endif %}
+
 
           {% endfor %}
 
+
           {{ processed_list }}
 
+
       tags: always
+
 
 
     - name: Force Strict Structural Type Casting
 
+
       set_fact:
+
 
         attack_sequence: "{{ attack_sequence | from_yaml }}"
 
+
         used_techniques: []
+
 
       tags: always
 
 
+
     # ==========================================================
+
 
     # ✅ DYNAMIC TARGET POOL RANDOMIZATION
 
+
     # ==========================================================
+
 
     - name: Establish Patient Zero and Random Downstream Targets
 
+
       set_fact:
+
 
         shuffled_hosts: "{{ groups['windows'] | shuffle }}"
 
+
       delegate_to: localhost
+
 
       delegate_facts: true
 
+
       run_once: true
 
+
       tags: always
+
 
 
     - name: Assign Campaign Hosts and Set Group Limits
 
+
       set_fact:
+
 
         patient_zero_host: "{{ hostvars['localhost']['shuffled_hosts'] | first }}"
 
+
         downstream_count: "{{ range(0, 3) | random }}"
+
 
       delegate_to: localhost
 
+
       delegate_facts: true
+
 
       run_once: true
 
+
       tags: always
+
 
 
     - name: Finalize Allowed Lateral Target Pool
 
+
       set_fact:
+
 
         allowed_downstream_targets: "{{ hostvars['localhost']['shuffled_hosts'][1:(1 + hostvars['localhost']['downstream_count'] | int)] }}"
 
+
         compromised_hosts: ["{{ hostvars['localhost']['patient_zero_host'] }}"]
+
 
       delegate_to: localhost
 
+
       delegate_facts: true
+
 
       run_once: true
 
+
       tags: always
+
 
 
     - name: DEBUG Campaign Initialization Layout
 
+
       debug:
+
 
         msg: >-
 
+
           Patient Zero Host = {{ hostvars['localhost']['patient_zero_host'] }}
+
 
           Number of Downstream Allowed = {{ hostvars['localhost']['downstream_count'] }}
 
+
           Allowed Downstream Targets = {{ hostvars['localhost']['allowed_downstream_targets'] }}
+
 
       delegate_to: localhost
 
+
       run_once: true
 
+
       tags: always
+
 
 
   roles:
 
+
     - users
 
+
     - normal_activity
+
 
     - engine
 
 
+
   # ==========================================================
+
 
   # ✅ POST-EXECUTION CONTROL LAYER
 
+
   # ==========================================================
+
 
   post_tasks:
 
+
     - name: Maintain Lab Environment Baseline Window (Sustain Background Noise)
+
 
       pause:
 
+
         minutes: "{{
+
 
           0 if sim_duration == 'test' else
 
+
           30 if sim_duration == '30m' else
+
 
           1440 if sim_duration == '24h' else
 
+
           4320 if sim_duration == '72h'
+
 
         }}"
 
+
       when: sim_duration != 'test'
+
 
       delegate_to: localhost
 
+
       run_once: true
+
 
       tags: always
 
 
+
     - name: Trigger Post-Campaign Cyber Range Evacuation
 
+
       include_tasks: roles/engine/tasks/cleanup.yml
+
 
       tags: always

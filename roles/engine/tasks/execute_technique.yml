@@ -1,126 +1,104 @@
 ---
 
-# ========================================================================
-
-# PRE-EXECUTION SCOPING: SAFE PRIMITIVE LOOKUP & DEFENSIVE GUARDS
 
 # ========================================================================
 
-- name: Resolve Atomic Primitive Key from Mapping Context
+# PRE-EXECUTION: SANITIZE AND RESOLVE TECHNIQUE → PRIMITIVE → COMMAND
 
-  ansible.builtin.set_fact:
-
-    primitive_key: >-
-
-      {{
-
-        (
-
-          mitre_mappings.mapping[current_step.technique.strip()].primitive
-
-          if (
-
-            mitre_mappings is defined and 
-
-            mitre_mappings.mapping is defined and 
-
-            current_step.technique.strip() in mitre_mappings.mapping
-
-          )
-
-          else
-
-          mitre_mappings.mapping[current_step.technique.strip().split('.')].primitive
-
-          if (
-
-            mitre_mappings is defined and 
-
-            mitre_mappings.mapping is defined and 
-
-            current_step.technique.strip().split('.') in mitre_mappings.mapping
-
-          )
-
-          else none
-
-        )
-
-      }}
-
-  tags: always
+# ========================================================================
 
 
-- name: Verify and Audit Primitive Mapping Resolution
+- name: Sanitize and Clean Technique ID Layout Strings
 
-  ansible.builtin.debug:
+  set_fact:
+
+    clean_technique: "{{ item.technique | string | trim }}"
+
+
+- name: Safely Extract Base Technique ID
+
+  set_fact:
+
+    base_technique: "{{ clean_technique.split('.') }}"
+
+
+- name: Resolve Mapping Entry (Full then Base Technique)
+
+  set_fact:
+
+    mapping_entry: "{{ mitre_mappings.mapping.get(clean_technique) or mitre_mappings.mapping.get(base_technique) or {} }}"
+
+
+- name: Apply Fallback Mapping if Missing
+
+  set_fact:
+
+    mapping_entry: "{{ mapping_entry if (mapping_entry | length > 0) else (mitre_mappings.fallback.get(item.phase | lower) or mitre_mappings.fallback.default) }}"
+
+
+- name: Extract Primitive + Command + Outcome
+
+  set_fact:
+
+    primitive_key: "{{ mapping_entry.primitive }}"
+
+    mapped_command: "{{ mapping_entry.command }}"
+
+    mapping_outcome: "{{ mapping_entry.outcome | default('none') }}"
+
+
+# ========================================================================
+
+# DEBUG VISIBILITY
+
+# ========================================================================
+
+
+- name: DEBUG Mapping Resolution
+
+  debug:
 
     msg:
 
-      - "Technique Context:   {{ current_step.technique }}"
+      - "Technique: {{ clean_technique }}"
 
-      - "Resolved Primitive:  {{ primitive_key | default('NOT FOUND', true) }}"
+      - "Base Technique: {{ base_technique }}"
 
-      - "Loaded Variants:     {{ atomic_primitives.primitives[primitive_key].variants | length if (atomic_primitives is defined and primitive_key is not none and primitive_key in atomic_primitives.primitives) else 0 }}"
+      - "Phase: {{ item.phase }}"
 
-  tags: always
+      - "Primitive: {{ primitive_key }}"
 
+      - "Command: {{ mapped_command }}"
 
-- name: Fail if Primitive Mapping is Missing (Calibration Safeguard)
+      - "Outcome: {{ mapping_outcome }}"
 
-  ansible.builtin.fail:
-
-    msg: >-
-
-      FATAL LOOKUP ERROR: Technique [{{ current_step.technique }}] could not be translated to an atomic primitive. 
-
-      Verify that 'mitre_mappings.mapping' contains this key or its base technique.
-
-  when: >
-
-    primitive_key is none or 
-
-    primitive_key | string | length == 0
-
-  tags: always
+      - "Variants Available: {{ atomic_primitives.primitives[primitive_key].variants | length if (primitive_key in atomic_primitives.primitives) else 0 }}"
 
 
 # ========================================================================
 
-# DEBUGGER: TELEMETRY AUDIT FOR RANGE CONDITIONALS
+# SAFETY GUARD
 
 # ========================================================================
 
-- name: "DEBUGGER: Audit Range Logic for {{ current_step.technique }}"
 
-  ansible.builtin.debug:
+- name: Fail if Primitive Missing Completely
 
-    msg:
+  fail:
 
-      - "Target Host:          {{ inventory_hostname }}"
+    msg: "Technique {{ clean_technique }} could not be mapped to a primitive."
 
-      - "Technique running:     {{ current_step.technique }}"
-
-      - "Resolved Primitive:    {{ primitive_key }}"
-
-      - "Current Step Stealth:  {{ current_step.stealth | lower }}"
-
-      - "Global OpSec Target:   {{ attack_behaviour | lower }}"
-
-      - "Test Single Tech Flag: {{ test_single_technique }} (Target ID: {{ test_technique_id | default('None') }})"
-
-      - "Test Single Phase Flag:{{ test_single_phase }} (Target Phase: {{ test_phase_name | default('None') }})"
-
-  tags: always
+  when: primitive_key is not defined or primitive_key | length == 0
 
 
 # ========================================================================
 
-# PRE-STAGE OPERATIONS
+# PRE-STAGE DIRECTORY
 
 # ========================================================================
 
-- name: Ensure Target Spooling Queue Folder Architecture Exists
+
+- name: Ensure Queue Directory Exists
 
   ansible.windows.win_file:
 
@@ -128,99 +106,231 @@
 
     state: directory
 
-  tags: always
-
 
 # ========================================================================
 
-# TASK 1: STAGE/COMPILE THE ADVERSARIAL ARTIFACT
+# STAGE EXECUTION ARTIFACTS (STATE + VARIANTS + OUTCOMES)
 
 # ========================================================================
 
-- name: Stage Compiled Adversarial Script to Local Worker Queue
+
+- name: Stage Technique Variants
 
   ansible.windows.win_copy:
 
-    dest: "C:\\ProgramData\\RangeEngine\\Queue\\{{ current_step.technique }}_{{ variant_item.name }}.ps1"
+    dest: "C:\\ProgramData\\RangeEngine\\Queue\\{{ clean_technique }}_{{ variant_item.name }}.ps1"
 
     content: |
 
       # ========================================================================
 
-      # ATOMIC PRIMITIVE ARTIFACT (Target Execution Context)
+      # RANGE ENGINE EXECUTION PAYLOAD
 
-      # Generated: {{ ansible_date_time.iso8601 }}
+      # MITRE: {{ clean_technique }}
 
-      # MITRE ATT&CK: {{ current_step.technique }} - {{ current_step.name | default('Unnamed') }}
+      # Primitive: {{ primitive_key }}
+
+      # Variant: {{ variant_item.name }}
 
       # ========================================================================
 
 
-      # Load localized environment memory layers
+      if (Test-Path "C:\ProgramData\RangeEngine\state.ps1") {
 
-      if (Test-Path "C:\ProgramData\RangeEngine\state.ps1") { . "C:\ProgramData\RangeEngine\state.ps1" }
+        . "C:\ProgramData\RangeEngine\state.ps1"
 
-
-      # Re-hydrate structural session boundaries injected by Ansible Orchestration
-
-      [string[]]$TARGETS = @(
-
-      {% for target in target_ips %}
-
-      "{{ target }}"{% if not loop.last %},{% endif %}
-
-      {% endfor %}
-
-      )
+      }
 
 
-      $USER = "{{ ansible_user }}"
-
-      $PASS = '{{ ansible_password | replace("'", "''") }}'
+      try {
 
 
-      # Execute variant code block primitive
+        Write-Output "[Execution] Running {{ clean_technique }} ({{ variant_item.name }})"
 
-      {{ variant_item.script | indent(6, first=false) }}
 
-    force: yes
+        # ------------------------------------------------------------
 
-  vars:
+        # EXECUTE VARIANT OR FALLBACK COMMAND
 
-    target_ips: "{{ groups['windows'] | default([inventory_hostname]) | map('extract', hostvars, ['ansible_host']) | list }}"
+        # ------------------------------------------------------------
 
-  loop: "{{ atomic_primitives.primitives[primitive_key].variants | default([]) }}"
+
+        {% if variant_item.script is defined %}
+
+        {{ variant_item.script | indent(8) }}
+
+        {% else %}
+
+        {{ mapped_command }}
+
+        {% endif %}
+
+
+        # ------------------------------------------------------------
+
+        # STATE ENGINE INTEGRATION
+
+        # ------------------------------------------------------------
+
+
+        $state = Get-RangeState
+
+        $outcome = "{{ mapping_outcome }}"
+
+
+        Write-Output "[State Engine] Outcome: $outcome"
+
+
+        switch ($outcome) {
+
+
+            "discovered_hosts" {
+
+
+                Write-Output "[State Engine] Adding discovered hosts"
+
+
+                foreach ($entry in @("fs01","dc01","ca01","wef01")) {
+
+                    if ($entry -notin $state.discovered_hosts) {
+
+                        Add-DiscoveredHost $entry
+
+                    }
+
+                }
+
+            }
+
+
+            "credentials" {
+
+
+                Write-Output "[State Engine] Adding credential artifact"
+
+
+                Add-Credential "admin" "{{ clean_technique }}"
+
+            }
+
+
+            "lateral_movement" {
+
+
+                # =====================================================
+
+                # RANDOM + BOUNDED + ATTRIBUTED LATERAL MOVEMENT
+
+                # =====================================================
+
+
+                $maxSpread = {{ max_compromise_count | default(3) }}
+
+                $currentOwned = @($state.owned_hosts).Count
+
+
+                Write-Output "[State Engine] Current owned hosts: $currentOwned / $maxSpread"
+
+
+                if ($currentOwned -ge $maxSpread) {
+
+
+                    Write-Output "[State Engine] Spread limit reached - stopping lateral movement"
+
+
+                } else {
+
+
+                    $candidates = @($state.discovered_hosts | Where-Object { $_ -notin $state.owned_hosts })
+
+
+                    if ($candidates.Count -eq 0) {
+
+
+                        Write-Output "[State Engine] No valid candidates for lateral movement"
+
+
+                    } else {
+
+
+                        $chance = Get-Random -Minimum 1 -Maximum 100
+
+
+                        Write-Output "[State Engine] Lateral attempt roll: $chance"
+
+
+                        if ($chance -le 50) {
+
+
+                            $target = Get-Random -InputObject $candidates
+
+
+                            Write-Output "[State Engine] SUCCESS - New host compromised: $target"
+
+
+                            Add-OwnedHost $target
+
+
+                            # Track source → target pathing
+
+                            Add-LateralLink $env:COMPUTERNAME $target
+
+
+                        } else {
+
+
+                            Write-Output "[State Engine] FAILED - Lateral movement attempt unsuccessful"
+
+                        }
+
+                    }
+
+                }
+
+            }
+
+
+            default {
+
+                # No state change
+
+            }
+
+        }
+
+
+      } catch {
+
+        Write-Output "[Execution Error]"
+
+        $_
+
+      }
+
+
+  loop: "{{ atomic_primitives.primitives[primitive_key].variants | default([{'name': 'default', 'script': mapped_command}]) }}"
 
   loop_control:
 
     loop_var: variant_item
 
-    label: "Staging -> {{ current_step.technique }} | Variant: {{ variant_item.name }}"
-
   when:
 
-    - primitive_key is not none
+    - (attack_behaviour == 'mixed') or (item.stealth | lower == attack_behaviour | lower)
 
-    - primitive_key | string | length > 0
+    - (not test_single_technique) or (clean_technique | lower == test_technique_id | lower)
 
-    - (attack_behaviour == 'mixed') or (current_step.stealth | lower == attack_behaviour | lower)
-
-    - (not test_single_technique) or (current_step.technique | lower == test_technique_id | lower)
-
-    - (not test_single_phase) or (current_step.phase | lower == test_phase_name | lower)
-
-    - variant_item.name | lower != 'poison_pill'
-
-  tags: always
+    - (not test_single_phase) or (item.phase | lower == test_phase_name | lower)
 
 
 # ========================================================================
 
-# TASK 2: EXECUTION LAYER & POISON PILL SANITIZATION
+# EXECUTION LAYER
 
 # ========================================================================
 
-- name: Execute Variant Worker Layer or Fire Poison Pill Sanctuary
+
+- name: Execute Technique Variants
 
   ansible.windows.win_powershell:
 
@@ -228,84 +338,107 @@
 
       $ErrorActionPreference = "Stop"
 
-      $EngineRoot = "C:\ProgramData\RangeEngine"
 
-      $QueueFolder = "$EngineRoot\Queue"
+      $Queue = "C:\ProgramData\RangeEngine\Queue"
 
-
-      # --------------------------------------------------------------------
-
-      # CONDITION: HANDLE POISON PILL (CLEANUP TRIGGER)
-
-      # --------------------------------------------------------------------
-
-      if ("{{ variant_item.name | lower }}" -eq "poison_pill") {
-
-          Write-Output "[Execution Engine] Poison Pill detected! Sanitizing queue folder..."
-
-          if (Test-Path $QueueFolder) {
-
-              Remove-Item -Path "$QueueFolder\*" -Include "*.ps1" -Force -ErrorAction SilentlyContinue
-
-          }
-
-          $Ansible.Changed = $true
-
-          Exit 0
-
-      }
+      $Script = "$Queue\{{ clean_technique }}_{{ variant_item.name }}.ps1"
 
 
-      # --------------------------------------------------------------------
+      if (Test-Path $Script) {
 
-      # RUN STAGED TECHNIQUE ARTIFACT
+          Write-Output "[Execution Engine] Running {{ clean_technique }} ({{ variant_item.name }})"
 
-      # --------------------------------------------------------------------
-
-      $ScriptPath = "$QueueFolder\{{ current_step.technique }}_{{ variant_item.name }}.ps1"
-
-      
-
-      if (Test-Path $ScriptPath) {
-
-          Write-Output "[Execution Engine] Spooling Task (Technique: {{ current_step.technique }} | Variant: {{ variant_item.name }})"
-
-          & $ScriptPath
-
-          $Ansible.Changed = $true
+          & $Script
 
       } else {
 
-          Write-Error "[Execution Engine] Expected staged primitive file was missing: $ScriptPath"
+          Write-Error "Missing script: $Script"
 
       }
 
-  vars:
 
-    target_ips: "{{ groups['windows'] | default([inventory_hostname]) | map('extract', hostvars, ['ansible_host']) | list }}"
-
-  loop: "{{ atomic_primitives.primitives[primitive_key].variants | default([]) }}"
+  loop: "{{ atomic_primitives.primitives[primitive_key].variants | default([{'name': 'default'}]) }}"
 
   loop_control:
 
     loop_var: variant_item
 
-    label: "Running -> {{ current_step.technique }} | Variant: {{ variant_item.name }}"
-
-  register: variant_execution_results
-
   when:
 
-    - primitive_key is not none
+    - (attack_behaviour == 'mixed') or (item.stealth | lower == attack_behaviour | lower)
 
-    - primitive_key | string | length > 0
+    - (not test_single_technique) or (clean_technique | lower == test_technique_id | lower)
 
-    - (attack_behaviour == 'mixed') or (current_step.stealth | lower == attack_behaviour | lower)
-
-    - (not test_single_technique) or (current_step.technique | lower == test_technique_id | lower)
-
-    - (not test_single_phase) or (current_step.phase | lower == test_phase_name | lower)
+    - (not test_single_phase) or (item.phase | lower == test_phase_name | lower)
 
   ignore_errors: yes
 
-  tags: always
+  register: execution_results
+
+
+# ========================================================================
+
+# SYNC STATE BACK TO ANSIBLE (MULTI-HOST CAMPAIGN)
+
+# ========================================================================
+
+
+- name: Pull state.json from host
+
+  ansible.windows.win_shell: |
+
+    if (Test-Path "C:\ProgramData\RangeEngine\state.json") {
+
+      Get-Content "C:\ProgramData\RangeEngine\state.json" -Raw
+
+    }
+
+  register: state_data
+
+
+- name: Extract owned hosts
+
+  set_fact:
+
+    new_owned_hosts: "{{ (state_data.stdout | from_json).owned_hosts | default([]) }}"
+
+  when: state_data.stdout is defined and state_data.stdout | length > 0
+
+
+- name: Merge into global compromised_hosts
+
+  set_fact:
+
+    compromised_hosts: "{{ (compromised_hosts | default([]) + new_owned_hosts) | unique }}"
+
+  delegate_to: localhost
+
+  run_once: true
+
+
+# ========================================================================
+
+# OPTIONAL CLEANUP (POISON PILL SAFE)
+
+# ========================================================================
+
+
+- name: Handle Poison Pill Cleanup
+
+  ansible.windows.win_powershell:
+
+    script: |
+
+      $Queue = "C:\ProgramData\RangeEngine\Queue"
+
+
+      Write-Output "[Cleanup] Clearing execution queue"
+
+
+      if (Test-Path $Queue) {
+
+          Remove-Item "$Queue\*" -Force -Recurse -ErrorAction SilentlyContinue
+
+      }
+
+  when: item.name is defined and item.name | lower is search("poison")

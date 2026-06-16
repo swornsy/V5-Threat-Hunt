@@ -1,6 +1,5 @@
 ---
 
-
 # ========================================================================
 
 # PRE-EXECUTION: SANITIZE AND RESOLVE TECHNIQUE → PRIMITIVE → COMMAND
@@ -241,7 +240,6 @@
 
       }
 
-
   loop: "{{ atomic_primitives.primitives[primitive_key].variants | default([{'name': 'default', 'script': mapped_command}]) }}"
 
   loop_control:
@@ -285,14 +283,14 @@
 
       $ScriptFailed = $false
 
+      $CapturedOutput = ""
+
 
       try {
 
           if (Test-Path $Script) {
 
-              Write-Output "[Execution Engine] Running {{ clean_technique }} ({{ variant_item.name }})"
-
-              & $Script
+              $CapturedOutput = & $Script | Out-String
 
           } else {
 
@@ -304,30 +302,33 @@
 
           $ScriptFailed = $true
 
-          throw $_
+          $CapturedOutput = $_ | Out-String
 
       } finally {
 
-          # Return the structured metrics object back through the PowerShell pipeline output stream
+          # Pack telemetry as ordered dictionary and cast PIDs explicitly to clean strings
 
-          [PSCustomObject]@{
+          $TelemetryResult = [ordered]@{
 
-              changed    = $true
+              failed    = $ScriptFailed
 
-              failed     = $ScriptFailed
+              ppid      = [string]$ParentPID
 
-              ppid       = $ParentPID
+              pid       = [string]$PID
 
-              pid        = $PID
+              technique = "{{ clean_technique }}"
 
-              technique  = "{{ clean_technique }}"
+              variant   = "{{ variant_item.name }}"
 
-              variant    = "{{ variant_item.name }}"
+              log       = $CapturedOutput
 
           }
 
-      }
+          
 
+          Write-Output ($TelemetryResult | ConvertTo-Json -Compress)
+
+      }
 
   loop: "{{ atomic_primitives.primitives[primitive_key].variants | default([{'name': 'default'}]) }}"
 
@@ -350,7 +351,7 @@
 
 # ========================================================================
 
-# LOCAL CONTROL NODE LOGGING (EXTRACTING FROM NESTED PIPELINE OUTPUTS)
+# LOCAL CONTROL NODE LOGGING (EXTRACTING FROM PRE-FLATTENED STRING STREAM)
 
 # ========================================================================
 
@@ -367,6 +368,8 @@
 
     line: >
 
+      {% set telemetry = (loop_item.output | default(['{}'])) | join('') | from_json %}
+
       [{{ lookup('pipe', 'date +"%Y-%m-%d %H:%M:%S"') }}] 
 
       HOST: {{ inventory_hostname }} | 
@@ -377,13 +380,13 @@
 
       PRIMITIVE: {{ primitive_key }} | 
 
-      VARIANT: {{ loop_item.output.variant | default('default') }} |
+      VARIANT: {{ telemetry.variant | default('default') }} |
 
-      PID: {{ loop_item.output.pid | default('UNKNOWN') }} | 
+      PID: {{ telemetry.pid | default('UNKNOWN') }} | 
 
-      PARENT_PID: {{ loop_item.output.ppid | default('UNKNOWN') }} | 
+      PARENT_PID: {{ telemetry.ppid | default('UNKNOWN') }} | 
 
-      STATUS: {{ 'FAILED' if (loop_item.failed | default(false) or loop_item.output.failed | default(false) or loop_item.skipped | default(false)) else 'EXECUTED' }}
+      STATUS: {{ 'FAILED' if (loop_item.failed | default(false) or telemetry.failed | default(false) or loop_item.skipped | default(false)) else 'EXECUTED' }}
 
   loop: "{{ execution_results.results | default([]) }}"
 
@@ -424,7 +427,7 @@
 
   set_fact:
 
-    new_owned_hosts: "{{ (state_data.stdout | from_json).owned_hosts | default([]) }}"
+    new_owned_hosts: "{{ (state_data.stdout | default('{}') | from_json).owned_hosts | default([]) }}"
 
   when: state_data.stdout is defined and state_data.stdout | length > 0
 
@@ -455,9 +458,7 @@
 
       $Queue = "C:\ProgramData\RangeEngine\Queue"
 
-
       Write-Output "[Cleanup] Clearing execution queue"
-
 
       if (Test-Path $Queue) {
 

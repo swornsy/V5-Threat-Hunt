@@ -80,7 +80,7 @@ function Save-RangeState {
 
     .SYNOPSIS
 
-        Commits active session memory modifications safely back to disk.
+        Persists updated state object back to disk.
 
     #>
 
@@ -103,7 +103,7 @@ function Add-OwnedHost {
 
     .SYNOPSIS
 
-        Appends a newly compromised host asset to local state memory.
+        Registers newly compromised target assets.
 
     #>
 
@@ -212,4 +212,42 @@ function Add-Credential {
 
         Save-RangeState $state
 
+        Write-Output "[State Engine] Successfully registered newly harvested credential for user: $User"
+
     }
+
+}
+
+
+function Add-Collection {
+
+    <#
+
+    .SYNOPSIS
+
+        Tracks localized file/data staging archives gathered across techniques.
+
+    #>
+
+    param(
+
+        [Parameter(Mandatory=$true)]
+
+        [string]$CollectionPath
+
+    )
+
+    $state = Get-RangeState
+
+
+    if ($CollectionPath -notin $state.collections) {
+
+        $state.collections += $CollectionPath
+
+        Save-RangeState $state
+
+        Write-Output "[State Engine] Logged newly staged collection path: $CollectionPath"
+
+    }
+
+}

@@ -63,33 +63,49 @@ mapping:
 
     primitive: host_discovery
 
+    outcome: discovered_hosts
+
   T1082:
 
     primitive: host_discovery
+
+    outcome: discovered_hosts
 
   T1057:
 
     primitive: process_discovery
 
+    outcome: discovered_hosts
+
   T1083:
 
     primitive: file_discovery
+
+    outcome: discovered_hosts
 
   T1016:
 
     primitive: network_discovery
 
+    outcome: discovered_hosts
+
   T1018:
 
     primitive: network_discovery
+
+    outcome: discovered_hosts
 
   T1046:
 
     primitive: network_discovery
 
+    outcome: discovered_hosts
+
   T1087.002:
 
     primitive: account_discovery
+
+    outcome: discovered_hosts
 
 
   # === Credential Access ===
@@ -98,25 +114,37 @@ mapping:
 
     primitive: credential_access
 
+    outcome: credentials
+
   T1555.003:
 
     primitive: browser_credential_access
+
+    outcome: credentials
 
   T1003.001:
 
     primitive: lsass_access
 
+    outcome: credentials
+
   T1003.002:
 
     primitive: sam_access
+
+    outcome: credentials
 
   T1110:
 
     primitive: password_attack
 
+    outcome: credentials
+
   T1558:
 
     primitive: kerberos_interaction
+
+    outcome: credentials
 
 
   # === Lateral Movement ===
@@ -125,13 +153,19 @@ mapping:
 
     primitive: lateral_rdp
 
+    outcome: lateral_movement
+
   T1021.002:
 
     primitive: lateral_smb
 
+    outcome: lateral_movement
+
   T1047:
 
     primitive: lateral_wmi
+
+    outcome: lateral_movement
 
 
   # === Collection & Exfiltration ===
@@ -166,3 +200,12 @@ mapping:
   T1070.004:
 
     primitive: cleanup
+
+
+fallback:
+
+  default:
+
+    primitive: exec_shell
+
+    command: "cmd.exe /c echo Base Engine Benchmark"

@@ -35,18 +35,40 @@
 
 # --------------------------------------------------------------------
 
-- name: Ensure RangeEngine Root Directory Exists on Target
+
+- name: Ensure RangeEngine Directories Are Staged Cleanly
 
   ansible.windows.win_file:
 
-    path: C:\ProgramData\RangeEngine
+    path: "{{ item }}"
 
     state: directory
 
+  loop:
+
+    - C:\ProgramData\RangeEngine
+
+    - C:\ProgramData\RangeEngine\Queue
+
   when: inventory_hostname == hostvars['localhost']['patient_zero_host']
 
+  tags: always
 
-- name: Deploy Local State Machine Core Script (state.ps1)
+
+- name: Clean Legacy Range State Engines to Prevent Duplication Append
+
+  ansible.windows.win_file:
+
+    path: C:\ProgramData\RangeEngine\state.ps1
+
+    state: absent
+
+  when: inventory_hostname == hostvars['localhost']['patient_zero_host']
+
+  tags: always
+
+
+- name: Deploy Pristine State Machine Core Script (state.ps1)
 
   ansible.windows.win_copy:
 
@@ -54,7 +76,11 @@
 
     dest: C:\ProgramData\RangeEngine\state.ps1
 
+    force: yes
+
   when: inventory_hostname == hostvars['localhost']['patient_zero_host']
+
+  tags: always
 
 
 # --------------------------------------------------------------------
@@ -63,11 +89,14 @@
 
 # --------------------------------------------------------------------
 
+
 - name: Process Campaign Adversary Execution Sequence Loop
 
   include_tasks: execute_technique.yml
 
   vars:
+
+    item: "{{ current_step }}"  # Maps current_step explicitly to 'item' for downstream task processing context
 
     target_ips: "{{ hostvars['localhost']['allowed_downstream_targets'] | map('extract', hostvars, ['ansible_host']) | list }}"
 

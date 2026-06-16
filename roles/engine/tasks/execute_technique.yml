@@ -19,60 +19,32 @@
 
   set_fact:
 
-    base_technique: "{{ clean_technique.split('.') }}"
+    base_technique: "{{ clean_technique | regex_replace('\\..*', '') }}"
 
 
 - name: Resolve Mapping Entry (Full then Base Technique)
 
   set_fact:
 
-    mapping_entry: "{{ mitre_mappings.mapping.get(clean_technique) or mitre_mappings.mapping.get(base_technique) or {} }}"
+    mapping_entry: "{{ mitre_mappings.mapping.get(clean_technique | string) or mitre_mappings.mapping.get(base_technique | string) or {} }}"
 
 
 - name: Apply Fallback Mapping if Missing
 
   set_fact:
 
-    mapping_entry: "{{ mapping_entry if (mapping_entry | length > 0) else (mitre_mappings.fallback.get(item.phase | lower) or mitre_mappings.fallback.default) }}"
+    mapping_entry: "{{ mapping_entry if (mapping_entry | length > 0) else (mitre_mappings.fallback.get(item.phase | lower) or mitre_mappings.fallback.default or {}) }}"
 
 
 - name: Extract Primitive + Command + Outcome
 
   set_fact:
 
-    primitive_key: "{{ mapping_entry.primitive }}"
+    primitive_key: "{{ mapping_entry.get('primitive', '') }}"
 
-    mapped_command: "{{ mapping_entry.command }}"
+    mapped_command: "{{ mapping_entry.get('command', '') }}"
 
-    mapping_outcome: "{{ mapping_entry.outcome | default('none') }}"
-
-
-# ========================================================================
-
-# DEBUG VISIBILITY
-
-# ========================================================================
-
-
-- name: DEBUG Mapping Resolution
-
-  debug:
-
-    msg:
-
-      - "Technique: {{ clean_technique }}"
-
-      - "Base Technique: {{ base_technique }}"
-
-      - "Phase: {{ item.phase }}"
-
-      - "Primitive: {{ primitive_key }}"
-
-      - "Command: {{ mapped_command }}"
-
-      - "Outcome: {{ mapping_outcome }}"
-
-      - "Variants Available: {{ atomic_primitives.primitives[primitive_key].variants | length if (primitive_key in atomic_primitives.primitives) else 0 }}"
+    mapping_outcome: "{{ mapping_entry.get('outcome', 'none') }}"
 
 
 # ========================================================================
@@ -144,7 +116,6 @@
 
       try {
 
-
         Write-Output "[Execution] Running {{ clean_technique }} ({{ variant_item.name }})"
 
 
@@ -153,7 +124,6 @@
         # EXECUTE VARIANT OR FALLBACK COMMAND
 
         # ------------------------------------------------------------
-
 
         {% if variant_item.script is defined %}
 
@@ -172,7 +142,6 @@
 
         # ------------------------------------------------------------
 
-
         $state = Get-RangeState
 
         $outcome = "{{ mapping_outcome }}"
@@ -183,12 +152,9 @@
 
         switch ($outcome) {
 
-
             "discovered_hosts" {
 
-
                 Write-Output "[State Engine] Adding discovered hosts"
-
 
                 foreach ($entry in @("fs01","dc01","ca01","wef01")) {
 
@@ -202,82 +168,52 @@
 
             }
 
-
             "credentials" {
 
-
                 Write-Output "[State Engine] Adding credential artifact"
-
 
                 Add-Credential "admin" "{{ clean_technique }}"
 
             }
 
-
             "lateral_movement" {
-
-
-                # =====================================================
-
-                # RANDOM + BOUNDED + ATTRIBUTED LATERAL MOVEMENT
-
-                # =====================================================
-
 
                 $maxSpread = {{ max_compromise_count | default(3) }}
 
                 $currentOwned = @($state.owned_hosts).Count
-
 
                 Write-Output "[State Engine] Current owned hosts: $currentOwned / $maxSpread"
 
 
                 if ($currentOwned -ge $maxSpread) {
 
-
                     Write-Output "[State Engine] Spread limit reached - stopping lateral movement"
-
 
                 } else {
 
-
                     $candidates = @($state.discovered_hosts | Where-Object { $_ -notin $state.owned_hosts })
-
 
                     if ($candidates.Count -eq 0) {
 
-
                         Write-Output "[State Engine] No valid candidates for lateral movement"
-
 
                     } else {
 
-
                         $chance = Get-Random -Minimum 1 -Maximum 100
-
 
                         Write-Output "[State Engine] Lateral attempt roll: $chance"
 
-
                         if ($chance -le 50) {
-
 
                             $target = Get-Random -InputObject $candidates
 
-
                             Write-Output "[State Engine] SUCCESS - New host compromised: $target"
-
 
                             Add-OwnedHost $target
 
-
-                            # Track source → target pathing
-
                             Add-LateralLink $env:COMPUTERNAME $target
 
-
                         } else {
-
 
                             Write-Output "[State Engine] FAILED - Lateral movement attempt unsuccessful"
 
@@ -289,7 +225,6 @@
 
             }
 
-
             default {
 
                 # No state change
@@ -297,7 +232,6 @@
             }
 
         }
-
 
       } catch {
 
@@ -325,7 +259,7 @@
 
 # ========================================================================
 
-# EXECUTION LAYER
+# EXECUTION LAYER WITH LINEAGE TRACKING
 
 # ========================================================================
 
@@ -344,15 +278,53 @@
       $Script = "$Queue\{{ clean_technique }}_{{ variant_item.name }}.ps1"
 
 
-      if (Test-Path $Script) {
+      $CurrentProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $PID"
 
-          Write-Output "[Execution Engine] Running {{ clean_technique }} ({{ variant_item.name }})"
+      $ParentPID = $CurrentProcess.ParentProcessId
 
-          & $Script
 
-      } else {
+      $ScriptFailed = $false
 
-          Write-Error "Missing script: $Script"
+
+      try {
+
+          if (Test-Path $Script) {
+
+              Write-Output "[Execution Engine] Running {{ clean_technique }} ({{ variant_item.name }})"
+
+              & $Script
+
+          } else {
+
+              Write-Error "Missing script: $Script"
+
+          }
+
+      } catch {
+
+          $ScriptFailed = $true
+
+          throw $_
+
+      } finally {
+
+          # Return the structured metrics object back through the PowerShell pipeline output stream
+
+          [PSCustomObject]@{
+
+              changed    = $true
+
+              failed     = $ScriptFailed
+
+              ppid       = $ParentPID
+
+              pid        = $PID
+
+              technique  = "{{ clean_technique }}"
+
+              variant    = "{{ variant_item.name }}"
+
+          }
 
       }
 
@@ -374,6 +346,58 @@
   ignore_errors: yes
 
   register: execution_results
+
+
+# ========================================================================
+
+# LOCAL CONTROL NODE LOGGING (EXTRACTING FROM NESTED PIPELINE OUTPUTS)
+
+# ========================================================================
+
+
+- name: Append Simulation Telemetry to Local Activity Log
+
+  ansible.builtin.lineinfile:
+
+    path: /tmp/adversary_activity
+
+    create: yes
+
+    mode: '0644'
+
+    line: >
+
+      [{{ lookup('pipe', 'date +"%Y-%m-%d %H:%M:%S"') }}] 
+
+      HOST: {{ inventory_hostname }} | 
+
+      MITRE: {{ clean_technique }} | 
+
+      PHASE: {{ item.phase }} | 
+
+      PRIMITIVE: {{ primitive_key }} | 
+
+      VARIANT: {{ loop_item.output.variant | default('default') }} |
+
+      PID: {{ loop_item.output.pid | default('UNKNOWN') }} | 
+
+      PARENT_PID: {{ loop_item.output.ppid | default('UNKNOWN') }} | 
+
+      STATUS: {{ 'FAILED' if (loop_item.failed | default(false) or loop_item.output.failed | default(false) or loop_item.skipped | default(false)) else 'EXECUTED' }}
+
+  loop: "{{ execution_results.results | default([]) }}"
+
+  loop_control:
+
+    loop_var: loop_item
+
+  delegate_to: localhost
+
+  when: 
+
+    - execution_results is defined
+
+    - not loop_item.skipped | default(false)
 
 
 # ========================================================================

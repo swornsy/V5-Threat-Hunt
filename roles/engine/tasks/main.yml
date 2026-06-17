@@ -85,7 +85,7 @@
 
 # --------------------------------------------------------------------
 
-# EXECUTION LOOP
+# LINEAR CHRONOLOGICAL EXECUTION LOOP
 
 # --------------------------------------------------------------------
 
@@ -96,16 +96,26 @@
 
   vars:
 
-    item: "{{ current_step }}"  # Maps current_step explicitly to 'item' for downstream task processing context
+    # Explicitly map the loop variable back to 'item' so execute_technique.yml 
+
+    # evaluates 'item.technique', 'item.phase', and 'item.stealth' out-of-the-box
+
+    item: "{{ current_step }}"
 
     target_ips: "{{ hostvars['localhost']['allowed_downstream_targets'] | map('extract', hostvars, ['ansible_host']) | list }}"
 
-  loop: "{{ attack_sequence }}"
+  loop: "{{ attack_sequence | default([]) }}"
 
   loop_control:
 
     loop_var: current_step
 
-  when: inventory_hostname == hostvars['localhost']['patient_zero_host']
+  when: 
+
+    - inventory_hostname == hostvars['localhost']['patient_zero_host']
+
+    - attack_sequence is defined
+
+    - attack_sequence | length > 0
 
   tags: always

@@ -11,21 +11,21 @@
 
   set_fact:
 
-    clean_technique: "{{ item.technique | string | trim }}"
+    clean_technique: "{{ item.technique | string | trim | upper }}"
 
 
 - name: Safely Extract Base Technique ID
 
   set_fact:
 
-    base_technique: "{{ clean_technique | regex_replace('\\..*', '') }}"
+    base_technique: "{{ clean_technique | regex_replace('\\..*', '') | upper }}"
 
 
 - name: Resolve Mapping Entry (Full then Base Technique)
 
   set_fact:
 
-    mapping_entry: "{{ mitre_mappings.mapping.get(clean_technique | string) or mitre_mappings.mapping.get(base_technique | string) or {} }}"
+    mapping_entry: "{{ mitre_mappings.mapping.get(clean_technique) or mitre_mappings.mapping.get(base_technique) or {} }}"
 
 
 - name: Apply Fallback Mapping if Missing
@@ -59,7 +59,7 @@
 
     msg: "Technique {{ clean_technique }} could not be mapped to a primitive."
 
-  when: primitive_key is not defined or primitive_key | length == 0
+  when: primitive_key | length == 0
 
 
 # ========================================================================
@@ -80,7 +80,7 @@
 
 # ========================================================================
 
-# STAGE EXECUTION ARTIFACTS (STATE + VARIANTS + OUTCOMES)
+# STAGE EXECUTION ARTIFACTS
 
 # ========================================================================
 
@@ -118,12 +118,6 @@
         Write-Output "[Execution] Running {{ clean_technique }} ({{ variant_item.name }})"
 
 
-        # ------------------------------------------------------------
-
-        # EXECUTE VARIANT OR FALLBACK COMMAND
-
-        # ------------------------------------------------------------
-
         {% if variant_item.script is defined %}
 
         {{ variant_item.script | indent(8) }}
@@ -135,25 +129,14 @@
         {% endif %}
 
 
-        # ------------------------------------------------------------
-
-        # STATE ENGINE INTEGRATION
-
-        # ------------------------------------------------------------
-
         $state = Get-RangeState
 
         $outcome = "{{ mapping_outcome }}"
 
 
-        Write-Output "[State Engine] Outcome: $outcome"
-
-
         switch ($outcome) {
 
             "discovered_hosts" {
-
-                Write-Output "[State Engine] Adding discovered hosts"
 
                 foreach ($entry in @("fs01","dc01","ca01","wef01")) {
 
@@ -169,8 +152,6 @@
 
             "credentials" {
 
-                Write-Output "[State Engine] Adding credential artifact"
-
                 Add-Credential "admin" "{{ clean_technique }}"
 
             }
@@ -181,40 +162,20 @@
 
                 $currentOwned = @($state.owned_hosts).Count
 
-                Write-Output "[State Engine] Current owned hosts: $currentOwned / $maxSpread"
 
-
-                if ($currentOwned -ge $maxSpread) {
-
-                    Write-Output "[State Engine] Spread limit reached - stopping lateral movement"
-
-                } else {
+                if ($currentOwned -lt $maxSpread) {
 
                     $candidates = @($state.discovered_hosts | Where-Object { $_ -notin $state.owned_hosts })
 
-                    if ($candidates.Count -eq 0) {
+                    if ($candidates.Count -gt 0) {
 
-                        Write-Output "[State Engine] No valid candidates for lateral movement"
-
-                    } else {
-
-                        $chance = Get-Random -Minimum 1 -Maximum 100
-
-                        Write-Output "[State Engine] Lateral attempt roll: $chance"
-
-                        if ($chance -le 50) {
+                        if ((Get-Random -Minimum 1 -Maximum 100) -le 50) {
 
                             $target = Get-Random -InputObject $candidates
-
-                            Write-Output "[State Engine] SUCCESS - New host compromised: $target"
 
                             Add-OwnedHost $target
 
                             Add-LateralLink $env:COMPUTERNAME $target
-
-                        } else {
-
-                            Write-Output "[State Engine] FAILED - Lateral movement attempt unsuccessful"
 
                         }
 
@@ -224,23 +185,15 @@
 
             }
 
-            default {
-
-                # No state change
-
-            }
-
         }
 
       } catch {
-
-        Write-Output "[Execution Error]"
 
         $_
 
       }
 
-  loop: "{{ atomic_primitives.primitives[primitive_key].variants | default([{'name': 'default', 'script': mapped_command}]) }}"
+  loop: "{{ [ (atomic_primitives.primitives[primitive_key].variants | default([{'name': 'default', 'script': mapped_command}])) | first ] }}"
 
   loop_control:
 
@@ -248,16 +201,14 @@
 
   when:
 
-    - (attack_behaviour == 'mixed') or (item.stealth | lower == attack_behaviour | lower)
+    - selected_actor_techniques is defined
 
-    - (not test_single_technique) or (clean_technique | lower == test_technique_id | lower)
-
-    - (not test_single_phase) or (item.phase | lower == test_phase_name | lower)
+    - (clean_technique in selected_actor_techniques) or (base_technique in selected_actor_techniques)
 
 
 # ========================================================================
 
-# EXECUTION LAYER WITH LINEAGE TRACKING
+# EXECUTION LAYER
 
 # ========================================================================
 
@@ -294,7 +245,7 @@
 
           } else {
 
-              Write-Error "Missing script: $Script"
+              throw "Missing script file payload assignment: $Script"
 
           }
 
@@ -305,8 +256,6 @@
           $CapturedOutput = $_ | Out-String
 
       } finally {
-
-          # Pack telemetry as ordered dictionary and cast PIDs explicitly to clean strings
 
           $TelemetryResult = [ordered]@{
 
@@ -330,28 +279,26 @@
 
       }
 
-  loop: "{{ atomic_primitives.primitives[primitive_key].variants | default([{'name': 'default'}]) }}"
+  loop: "{{ [ (atomic_primitives.primitives[primitive_key].variants | default([{'name': 'default'}])) | first ] }}"
 
   loop_control:
 
     loop_var: variant_item
 
-  when:
-
-    - (attack_behaviour == 'mixed') or (item.stealth | lower == attack_behaviour | lower)
-
-    - (not test_single_technique) or (clean_technique | lower == test_technique_id | lower)
-
-    - (not test_single_phase) or (item.phase | lower == test_phase_name | lower)
-
   ignore_errors: yes
 
   register: execution_results
 
+  when:
+
+    - selected_actor_techniques is defined
+
+    - (clean_technique in selected_actor_techniques) or (base_technique in selected_actor_techniques)
+
 
 # ========================================================================
 
-# LOCAL CONTROL NODE LOGGING (EXTRACTING FROM PRE-FLATTENED STRING STREAM)
+# LOGGING
 
 # ========================================================================
 
@@ -370,23 +317,23 @@
 
       {% set telemetry = (loop_item.output | default(['{}'])) | join('') | from_json %}
 
-      [{{ lookup('pipe', 'date +"%Y-%m-%d %H:%M:%S"') }}] 
+      [{{ lookup('pipe', 'date +"%Y-%m-%d %H:%M:%S"') }}]
 
-      HOST: {{ inventory_hostname }} | 
+      HOST: {{ inventory_hostname }} |
 
-      MITRE: {{ clean_technique }} | 
+      MITRE: {{ clean_technique }} |
 
-      PHASE: {{ item.phase }} | 
+      PHASE: {{ item.phase | default('unknown') }} |
 
-      PRIMITIVE: {{ primitive_key }} | 
+      PRIMITIVE: {{ primitive_key }} |
 
       VARIANT: {{ telemetry.variant | default('default') }} |
 
-      PID: {{ telemetry.pid | default('UNKNOWN') }} | 
+      PID: {{ telemetry.pid | default('UNKNOWN') }} |
 
-      PARENT_PID: {{ telemetry.ppid | default('UNKNOWN') }} | 
+      PARENT_PID: {{ telemetry.ppid | default('UNKNOWN') }} |
 
-      STATUS: {{ 'FAILED' if (loop_item.failed | default(false) or telemetry.failed | default(false) or loop_item.skipped | default(false)) else 'EXECUTED' }}
+      STATUS: {{ 'FAILED' if (loop_item.failed | default(false) or telemetry.failed | default(false)) else 'EXECUTED' }}
 
   loop: "{{ execution_results.results | default([]) }}"
 
@@ -396,7 +343,7 @@
 
   delegate_to: localhost
 
-  when: 
+  when:
 
     - execution_results is defined
 
@@ -405,7 +352,7 @@
 
 # ========================================================================
 
-# SYNC STATE BACK TO ANSIBLE (MULTI-HOST CAMPAIGN)
+# STATE SYNC
 
 # ========================================================================
 
@@ -445,7 +392,7 @@
 
 # ========================================================================
 
-# OPTIONAL CLEANUP (POISON PILL SAFE)
+# CLEANUP
 
 # ========================================================================
 
@@ -457,8 +404,6 @@
     script: |
 
       $Queue = "C:\ProgramData\RangeEngine\Queue"
-
-      Write-Output "[Cleanup] Clearing execution queue"
 
       if (Test-Path $Queue) {
 

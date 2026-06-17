@@ -1,43 +1,30 @@
 ---
 
-
 # ========================================================================
-
 
 # V5 THREAT HUNT CYBER RANGE MASTER ORCHESTRATION PROFILE (site.yml)
 
-
 # ========================================================================
-
 
 
 - name: V5 Threat Hunt Adversary Emulation Engine (Testable Build)
 
-
   hosts: windows
-
 
   gather_facts: yes
 
 
-
   vars:
-
 
     # Default test switches
 
-
     test_single_phase: false
-
 
     test_phase_name: "execution"
 
-
     test_single_technique: false
 
-
-    test_technique_id: "t1059.001"
-
+    test_technique_id: "T1059.001"
 
 
   pre_tasks:
@@ -45,354 +32,422 @@
 
     # ==========================================================
 
-
-    # ✅ SEED GLOBAL ORCHESTRATION PHASES VIA FACTS
-
+    # Strict ATT&CK Phase Ordering
 
     # ==========================================================
-
 
     - name: Initialize Global Cyber Range ATT&CK Phases
 
-
       set_fact:
-
 
         valid_phases:
 
-
           - reconnaissance
-
 
           - initial-access
 
-
           - execution
-
 
           - persistence
 
-
           - privilege-escalation
-
 
           - defense-evasion
 
-
           - credential-access
-
 
           - discovery
 
-
           - lateral-movement
-
 
           - collection
 
-
           - command-and-control
-
 
           - exfiltration
 
-
           - impact
-
 
       tags: always
 
 
-
     # ==========================================================
 
-
-    # ✅ LOAD MATRIX (ALWAYS)
-
+    # Load ATT&CK Matrix
 
     # ==========================================================
-
 
     - name: Load attack matrix
 
-
       include_vars:
-
 
         file: "vars/mitre_attack_matrix.yml"
 
-
         name: raw_matrix
-
 
       delegate_to: localhost
 
-
       run_once: true
-
 
       tags: always
 
 
-
     # ==========================================================
 
-
-    # ✅ PARSE AND FLATTEN CAMPAIGN MATRIX NATIVELY ON ALL HOSTS
-
+    # Flatten Actor Techniques (Full List)
 
     # ==========================================================
-
 
     - name: Parse and Flatten Target Attack Sequence Array
 
-
       set_fact:
 
-
-        attack_sequence: >-
-
+        attack_sequence_full: >-
 
           {% set target_actor = selected_actor_id | default('G0016') %}
 
-
           {% set actor_data = raw_matrix['attack_matrix'][target_actor] | default({}) %}
-
 
           {% set processed_list = [] %}
 
 
-          {% for phase_name, actions in actor_data.items() %}
+          {% for phase_name in valid_phases %}
 
+            {% set actions = actor_data.get(phase_name, []) %}
 
             {% if actions is iterable and actions is not string and actions is not mapping %}
 
-
               {% for action in actions %}
-
 
                 {% if action is mapping and action.technique is defined %}
 
-
                   {% set action_copy = action.copy() %}
 
-
-                  {% set _ = action_copy.update({'phase': phase_name | string}) %}
-
+                  {% set _ = action_copy.update({'phase': phase_name}) %}
 
                   {% set _ = processed_list.append(action_copy) %}
 
-
                 {% endif %}
-
 
               {% endfor %}
 
-
             {% endif %}
-
 
           {% endfor %}
 
 
           {{ processed_list }}
 
-
       tags: always
 
 
-
-    - name: Force Strict Structural Type Casting
-
+    - name: Cast actor sequence to YAML
 
       set_fact:
 
-
-        attack_sequence: "{{ attack_sequence | from_yaml }}"
-
-
-        used_techniques: []
-
+        attack_sequence_full: "{{ attack_sequence_full | from_yaml }}"
 
       tags: always
 
 
+    # ==========================================================
+
+    # Build Phase-Indexed Actor Technique Map
 
     # ==========================================================
 
+    - name: Build phase-indexed actor technique map
 
-    # ✅ DYNAMIC TARGET POOL RANDOMIZATION
+      set_fact:
+
+        actor_phase_map: >-
+
+          {% set raw_groups = attack_sequence_full | groupby('phase') %}
+
+          {% set dict_pairs = [] %}
+
+          {% for g in raw_groups %}
+
+            {% set _ = dict_pairs.append({'key': g.grouper, 'value': g.list}) %}
+
+          {% endfor %}
+
+          {{ dict_pairs | items2dict }}
+
+      tags: always
+
+
+    - name: Cast phase map to Dictionary Object
+
+      set_fact:
+
+        actor_phase_map: "{{ actor_phase_map | from_yaml }}"
+
+      tags: always
 
 
     # ==========================================================
 
+    # Build Global Fallback Technique Pool (Dynamic Harvest)
+
+    # ==========================================================
+
+    - name: Build global fallback technique pool
+
+      set_fact:
+
+        global_pool: >-
+
+          {% set pool = [] %}
+
+          {% for actor_id, phases in (raw_matrix['attack_matrix'] | default({})).items() %}
+
+            {% for phase_name, techniques in phases.items() %}
+
+              {% if techniques is iterable and techniques is not string and techniques is not mapping %}
+
+                {% for tech in techniques %}
+
+                  {% if tech is mapping and tech.technique is defined %}
+
+                    {% set tech_copy = tech.copy() %}
+
+                    {% set _ = tech_copy.update({'phase': phase_name}) %}
+
+                    {% set _ = pool.append(tech_copy) %}
+
+                  {% endif %}
+
+                {% endfor %}
+
+              {% endif %}
+
+            {% endfor %}
+
+          {% endfor %}
+
+          {{ pool }}
+
+      tags: always
+
+
+    - name: Cast global pool to YAML List
+
+      set_fact:
+
+        global_pool: "{{ global_pool | from_yaml }}"
+
+      tags: always
+
+
+    # ==========================================================
+
+    # Curate 1 Technique Per Phase (Actor Preferred)
+
+    # ==========================================================
+
+    - name: Select 1 technique per phase (actor preferred, fallback allowed)
+
+      set_fact:
+
+        curated_attack_sequence: >-
+
+          {%- set result = [] -%}
+
+          {%- for phase in valid_phases -%}
+
+            {%- set actor_list = actor_phase_map.get(phase, []) -%}
+
+            {%- if actor_list | length > 0 -%}
+
+              {%- set _ = result.append(actor_list | random) -%}
+
+            {%- else -%}
+
+              {%- set phase_fallbacks = global_pool | selectattr('phase', 'equalto', phase) | list -%}
+
+              {%- if phase_fallbacks | length > 0 -%}
+
+                {%- set _ = result.append(phase_fallbacks | random) -%}
+
+              {%- else -%}
+
+                {%- set fallback = (global_pool | random) -%}
+
+                {%- set fallback_mod = fallback.copy() if fallback is mapping else {} -%}
+
+                {%- set _ = fallback_mod.update({'phase': phase}) -%}
+
+                {%- set _ = result.append(fallback_mod) -%}
+
+              {%- endif -%}
+
+            {%- endif -%}
+
+          {%- endfor -%}
+
+          {{ result }}
+
+      tags: always
+
+
+    - name: Cast curated sequence to YAML
+
+      set_fact:
+
+        attack_sequence: "{{ curated_attack_sequence | from_yaml }}"
+
+      tags: always
+
+
+    # ==========================================================
+
+    # Extract Actor Technique List (Uppercase)
+
+    # ==========================================================
+
+    - name: Extract dynamic technique list for actor guard
+
+      set_fact:
+
+        selected_actor_techniques: >-
+
+          {{
+
+            attack_sequence
+
+            | map(attribute='technique')
+
+            | map('string')
+
+            | map('upper')
+
+            | list
+
+          }}
+
+      tags: always
+
+
+    # ==========================================================
+
+    # Host Randomization
+
+    # ==========================================================
 
     - name: Establish Patient Zero and Random Downstream Targets
 
-
       set_fact:
-
 
         shuffled_hosts: "{{ groups['windows'] | shuffle }}"
 
-
       delegate_to: localhost
-
 
       delegate_facts: true
 
-
       run_once: true
 
-
       tags: always
-
 
 
     - name: Assign Campaign Hosts and Set Group Limits
 
-
       set_fact:
-
 
         patient_zero_host: "{{ hostvars['localhost']['shuffled_hosts'] | first }}"
 
-
         downstream_count: "{{ range(0, 3) | random }}"
-
 
       delegate_to: localhost
 
-
       delegate_facts: true
-
 
       run_once: true
 
-
       tags: always
-
 
 
     - name: Finalize Allowed Lateral Target Pool
 
-
       set_fact:
-
 
         allowed_downstream_targets: "{{ hostvars['localhost']['shuffled_hosts'][1:(1 + hostvars['localhost']['downstream_count'] | int)] }}"
 
-
         compromised_hosts: ["{{ hostvars['localhost']['patient_zero_host'] }}"]
-
 
       delegate_to: localhost
 
-
       delegate_facts: true
-
 
       run_once: true
 
-
       tags: always
-
 
 
     - name: DEBUG Campaign Initialization Layout
 
-
       debug:
-
 
         msg: >-
 
-
           Patient Zero Host = {{ hostvars['localhost']['patient_zero_host'] }}
-
 
           Number of Downstream Allowed = {{ hostvars['localhost']['downstream_count'] }}
 
-
           Allowed Downstream Targets = {{ hostvars['localhost']['allowed_downstream_targets'] }}
-
 
       delegate_to: localhost
 
-
       run_once: true
 
-
       tags: always
-
 
 
   roles:
 
-
     - users
 
-
     - normal_activity
-
 
     - engine
 
 
-
   # ==========================================================
 
-
-  # ✅ POST-EXECUTION CONTROL LAYER
-
+  # POST-EXECUTION CONTROL LAYER
 
   # ==========================================================
-
 
   post_tasks:
 
 
-    - name: Maintain Lab Environment Baseline Window (Sustain Background Noise)
-
+    - name: Maintain Lab Environment Baseline Window
 
       pause:
 
-
         minutes: "{{
-
 
           0 if sim_duration == 'test' else
 
-
           30 if sim_duration == '30m' else
-
 
           1440 if sim_duration == '24h' else
 
-
           4320 if sim_duration == '72h'
-
 
         }}"
 
-
       when: sim_duration != 'test'
-
 
       delegate_to: localhost
 
-
       run_once: true
-
 
       tags: always
 
 
-
     - name: Trigger Post-Campaign Cyber Range Evacuation
 
-
       include_tasks: roles/engine/tasks/cleanup.yml
-
 
       tags: always

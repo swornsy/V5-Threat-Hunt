@@ -1,121 +1,113 @@
 ---
-
+# ========================================================================
+# ENGINE ROLE — CROSS-PLATFORM MAIN (HARDENED INTEGRATION)
+# ========================================================================
+# Assumptions:
+# - attack_sequence is curated in site.yml (host-aware)
+# - campaign_start_ts is set in site.yml
+# - sim_duration is provided (or defaults)
+# - Workers run as compromised user (user-scoped state)
+# - Config/manifest are system-scoped so any user can read them
 # ========================================================================
 
-# V5 THREAT HUNT ENGINE CORE EXECUTION ENGINE (roles/engine/tasks/main.yml)
+# ------------------------------------------------------------------------
+# Ensure system-scoped config + queue directories exist
+# ------------------------------------------------------------------------
 
-# ========================================================================
-
-
-- name: Import Atomic Simulation Script Definitions
-
-  include_vars:
-
-    file: "vars/primitives.yml"
-
-    name: atomic_primitives
-
-  tags: always
-
-
-- name: Import MITRE ATT&CK Technique Mapping Rules
-
-  include_vars:
-
-    file: "vars/mitre_mapping.yml"
-
-    name: mitre_mappings
-
-  tags: always
-
-
-# --------------------------------------------------------------------
-
-# STAGE ENVIRONMENT: Deploy local state engine tracking mechanics
-
-# --------------------------------------------------------------------
-
-
-- name: Ensure RangeEngine Directories Are Staged Cleanly
-
+- name: Ensure shared config/queue directories exist (Windows)
   ansible.windows.win_file:
-
     path: "{{ item }}"
-
     state: directory
-
   loop:
-
-    - C:\ProgramData\RangeEngine
-
+    - C:\ProgramData\RangeEngine\Config
     - C:\ProgramData\RangeEngine\Queue
+  when: ansible_os_family == 'Windows'
 
-  when: inventory_hostname == hostvars['localhost']['patient_zero_host']
+- name: Ensure shared config/queue directories exist (Linux)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /etc/range_engine/config
+    - /etc/range_engine/queue
+  become: true
+  when: ansible_system == 'Linux'
 
-  tags: always
+# ------------------------------------------------------------------------
+# Write campaign manifest + config (system-scoped)
+# ------------------------------------------------------------------------
 
-
-- name: Clean Legacy Range State Engines to Prevent Duplication Append
-
-  ansible.windows.win_file:
-
-    path: C:\ProgramData\RangeEngine\state.ps1
-
-    state: absent
-
-  when: inventory_hostname == hostvars['localhost']['patient_zero_host']
-
-  tags: always
-
-
-- name: Deploy Pristine State Machine Core Script (state.ps1)
-
+- name: Write campaign manifest (Windows)
   ansible.windows.win_copy:
+    dest: C:\ProgramData\RangeEngine\Config\campaign_manifest.json
+    content: "{{ attack_sequence | to_json }}"
+  when: ansible_os_family == 'Windows'
 
-    src: files/state.ps1
+- name: Write campaign config (Windows)
+  ansible.windows.win_copy:
+    dest: C:\ProgramData\RangeEngine\Config\campaign_config.json
+    content: >
+      {{
+        {
+          "sim_duration": sim_duration | default("72h"),
+          "step_count": attack_sequence | length,
+          "campaign_start": campaign_start_ts | int
+        } | to_json
+      }}
+  when: ansible_os_family == 'Windows'
 
-    dest: C:\ProgramData\RangeEngine\state.ps1
+- name: Write campaign manifest (Linux)
+  ansible.builtin.copy:
+    dest: /etc/range_engine/config/campaign_manifest.json
+    content: "{{ attack_sequence | to_json }}"
+    mode: '0644'
+  become: true
+  when: ansible_system == 'Linux'
 
-    force: yes
+- name: Write campaign config (Linux)
+  ansible.builtin.copy:
+    dest: /etc/range_engine/config/campaign_config.json
+    content: >
+      {{
+        {
+          "sim_duration": sim_duration | default("72h"),
+          "step_count": attack_sequence | length,
+          "campaign_start": campaign_start_ts | int
+        } | to_json
+      }}
+    mode: '0644'
+  become: true
+  when: ansible_system == 'Linux'
 
-  when: inventory_hostname == hostvars['localhost']['patient_zero_host']
+# ------------------------------------------------------------------------
+# Provision + launch platform-specific workers
+# ------------------------------------------------------------------------
 
-  tags: always
+- name: Provision and launch Windows worker
+  include_tasks: provision_worker_windows.yml
+  when: ansible_os_family == 'Windows'
 
+- name: Provision and launch Linux worker
+  include_tasks: provision_worker_linux.yml
+  when: ansible_system == 'Linux'
 
-# --------------------------------------------------------------------
+# ------------------------------------------------------------------------
+# Optional inline engine execution (legacy mode alignment fixed)
+# ------------------------------------------------------------------------
 
-# LINEAR CHRONOLOGICAL EXECUTION LOOP
-
-# --------------------------------------------------------------------
-
-
-- name: Process Campaign Adversary Execution Sequence Loop
-
+- name: Execute curated attack sequence inline (optional)
   include_tasks: execute_technique.yml
-
-  vars:
-
-    # Explicitly map the loop variable back to 'item' so execute_technique.yml 
-
-    # evaluates 'item.technique', 'item.phase', and 'item.stealth' out-of-the-box
-
-    item: "{{ current_step }}"
-
-    target_ips: "{{ hostvars['localhost']['allowed_downstream_targets'] | map('extract', hostvars, ['ansible_host']) | list }}"
-
-  loop: "{{ attack_sequence | default([]) }}"
-
+  loop: "{{ attack_sequence }}"
+  # Aligned loop_var back to 'item' to prevent variable translation breakage inside execute_technique.yml
   loop_control:
+    loop_var: item
+  when: run_engine_inline | default(false)
 
-    loop_var: current_step
+# ------------------------------------------------------------------------
+# Final handoff
+# --------------------------------=======================================
 
-  when: 
-
-    - inventory_hostname == hostvars['localhost']['patient_zero_host']
-
-    - attack_sequence is defined
-
-    - attack_sequence | length > 0
-
-  tags: always
+- name: Engine handoff complete
+  debug:
+    msg: "Persistent worker launched for {{ inventory_hostname }}. Ansible handoff complete."

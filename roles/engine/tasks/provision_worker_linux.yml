@@ -1,0 +1,71 @@
+---
+# ========================================================================
+# LINUX WORKER PROVISIONING (USER-SCOPED STATE)
+# ========================================================================
+
+# Worker will use:
+#   ~/.range_engine/state.json
+#   ~/.range_engine/logs/
+# Config is read from /etc/range_engine/config/*.json
+
+- name: Ensure user-scoped range engine directory exists
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/.range_engine"
+    state: directory
+    mode: '0700'
+
+- name: Ensure user-scoped logs directory exists
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/.range_engine/logs"
+    state: directory
+    mode: '0700'
+
+- name: Ensure initial state.json exists
+  ansible.builtin.copy:
+    dest: "{{ ansible_env.HOME }}/.range_engine/state.json"
+    content: '{"credentials": [], "hosts": [], "events": []}'
+    mode: '0600'
+  when: not (ansible_env.HOME + '/.range_engine/state.json') is file
+
+# ------------------------------------------------------------------------
+# Python + pip + Impacket (installed as user, not system-wide)
+# ------------------------------------------------------------------------
+
+- name: Ensure Python3 is present
+  ansible.builtin.package:
+    name: python3
+    state: present
+  become: true
+
+- name: Ensure pip for Python3 is present
+  ansible.builtin.package:
+    name: python3-pip
+    state: present
+  become: true
+
+- name: Install Impacket in user context
+  ansible.builtin.pip:
+    name: impacket
+    executable: pip3
+    extra_args: "--user"
+
+# ------------------------------------------------------------------------
+# Stage Linux worker script
+# ------------------------------------------------------------------------
+
+- name: Stage Linux worker script
+  ansible.builtin.copy:
+    src: range_worker.sh
+    dest: "{{ ansible_env.HOME }}/.range_engine/range_worker.sh"
+    mode: '0700'
+
+# ------------------------------------------------------------------------
+# Launch Linux worker (user-scoped, background)
+# ------------------------------------------------------------------------
+
+- name: Launch Linux background worker
+  ansible.builtin.shell: |
+    nohup "{{ ansible_env.HOME }}/.range_engine/range_worker.sh" \
+      >> "{{ ansible_env.HOME }}/.range_engine/logs/worker.log" 2>&1 &
+  async: 10
+  poll: 0

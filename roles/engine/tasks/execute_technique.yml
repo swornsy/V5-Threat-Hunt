@@ -1,414 +1,258 @@
 ---
-
 # ========================================================================
-
 # PRE-EXECUTION: SANITIZE AND RESOLVE TECHNIQUE → PRIMITIVE → COMMAND
-
 # ========================================================================
-
 
 - name: Sanitize and Clean Technique ID Layout Strings
-
   set_fact:
-
     clean_technique: "{{ item.technique | string | trim | upper }}"
 
-
 - name: Safely Extract Base Technique ID
-
   set_fact:
-
     base_technique: "{{ clean_technique | regex_replace('\\..*', '') | upper }}"
 
-
 - name: Resolve Mapping Entry (Full then Base Technique)
-
   set_fact:
-
     mapping_entry: "{{ mitre_mappings.mapping.get(clean_technique) or mitre_mappings.mapping.get(base_technique) or {} }}"
-
+  when: mitre_mappings is defined
 
 - name: Apply Fallback Mapping if Missing
-
   set_fact:
+    mapping_entry: "{{ mapping_entry if (mapping_entry | default({}) | length > 0) else (mitre_mappings.fallback.get(item.phase | lower) or mitre_mappings.fallback.default or {}) }}"
+  when: mitre_mappings is defined
 
-    mapping_entry: "{{ mapping_entry if (mapping_entry | length > 0) else (mitre_mappings.fallback.get(item.phase | lower) or mitre_mappings.fallback.default or {}) }}"
-
-
-- name: Extract Primitive + Command + Outcome
-
+- name: Extract Primitive + Command + Outcome (Hardened)
   set_fact:
-
-    primitive_key: "{{ mapping_entry.get('primitive', '') }}"
-
-    mapped_command: "{{ mapping_entry.get('command', '') }}"
-
-    mapping_outcome: "{{ mapping_entry.get('outcome', 'none') }}"
-
+    primitive_key: "{{ (mapping_entry | default({})).get('primitive', '') }}"
+    mapped_command: "{{ (mapping_entry | default({})).get('command', '') }}"
+    mapping_outcome: "{{ (mapping_entry | default({})).get('outcome', 'none') }}"
 
 # ========================================================================
-
 # SAFETY GUARD
-
 # ========================================================================
-
 
 - name: Fail if Primitive Missing Completely
-
   fail:
-
     msg: "Technique {{ clean_technique }} could not be mapped to a primitive."
-
   when: primitive_key | length == 0
 
-
 # ========================================================================
-
 # PRE-STAGE DIRECTORY
-
 # ========================================================================
-
 
 - name: Ensure Queue Directory Exists
-
   ansible.windows.win_file:
-
     path: C:\ProgramData\RangeEngine\Queue
-
     state: directory
-
+  when: ansible_os_family == 'Windows'
 
 # ========================================================================
-
 # STAGE EXECUTION ARTIFACTS
-
 # ========================================================================
-
 
 - name: Stage Technique Variants
-
   ansible.windows.win_copy:
-
     dest: "C:\\ProgramData\\RangeEngine\\Queue\\{{ clean_technique }}_{{ variant_item.name }}.ps1"
-
     content: |
-
       # ========================================================================
-
       # RANGE ENGINE EXECUTION PAYLOAD
-
       # MITRE: {{ clean_technique }}
-
       # Primitive: {{ primitive_key }}
-
       # Variant: {{ variant_item.name }}
-
       # ========================================================================
-
 
       if (Test-Path "C:\ProgramData\RangeEngine\state.ps1") {
-
         . "C:\ProgramData\RangeEngine\state.ps1"
-
       }
 
-
       try {
-
         Write-Output "[Execution] Running {{ clean_technique }} ({{ variant_item.name }})"
 
-
         {% if variant_item.script is defined %}
-
         {{ variant_item.script | indent(8) }}
-
         {% else %}
-
         {{ mapped_command }}
-
         {% endif %}
 
+        # Hardened state discovery with file system locking tolerance 
+        $StatePath = "C:\ProgramData\RangeEngine\state.json"
+        $state = $null
 
-        $state = Get-RangeState
-
-        $outcome = "{{ mapping_outcome }}"
-
-
-        switch ($outcome) {
-
-            "discovered_hosts" {
-
-                foreach ($entry in @("fs01","dc01","ca01","wef01")) {
-
-                    if ($entry -notin $state.discovered_hosts) {
-
-                        Add-DiscoveredHost $entry
-
+        if (Test-Path $StatePath) {
+            $RetryCount = 0
+            while ($RetryCount -lt 3) {
+                try {
+                    $RawContent = Get-Content $StatePath -Raw -ErrorAction Stop
+                    if (-not [string]::IsNullOrWhiteSpace($RawContent)) {
+                        $state = $RawContent | ConvertFrom-Json -ErrorAction Stop
                     }
-
+                    if ($null -ne $state) { break }
+                } catch {
+                    $RetryCount++
+                    Start-Sleep -Milliseconds 250
                 }
-
             }
+        } 
 
-            "credentials" {
-
-                Add-Credential "admin" "{{ clean_technique }}"
-
+        if ($null -eq $state) {
+            $state = [pscustomobject]@{
+              discovered_hosts = @()
+              owned_hosts      = @()
+              credentials      = @()
             }
-
-            "lateral_movement" {
-
-                $maxSpread = {{ max_compromise_count | default(3) }}
-
-                $currentOwned = @($state.owned_hosts).Count
-
-
-                if ($currentOwned -lt $maxSpread) {
-
-                    $candidates = @($state.discovered_hosts | Where-Object { $_ -notin $state.owned_hosts })
-
-                    if ($candidates.Count -gt 0) {
-
-                        if ((Get-Random -Minimum 1 -Maximum 100) -le 50) {
-
-                            $target = Get-Random -InputObject $candidates
-
-                            Add-OwnedHost $target
-
-                            Add-LateralLink $env:COMPUTERNAME $target
-
-                        }
-
-                    }
-
-                }
-
-            }
-
         }
 
+        $outcome = "{{ mapping_outcome }}"
+        $stateUpdated = $false
+
+        switch ($outcome) {
+            "discovered_hosts" {
+                foreach ($entry in @("fs01","dc01","ca01","wef01")) {
+                    if ($entry -notin $state.discovered_hosts) {
+                        $state.discovered_hosts += $entry
+                        $stateUpdated = $true
+                    }
+                }
+            }
+            "credentials" {
+                $state.credentials += "{{ clean_technique }}"
+                $stateUpdated = $true
+            }
+            "lateral_movement" {
+                $maxSpread = {{ max_compromise_count | default(3) }}
+                $currentOwned = @($state.owned_hosts).Count
+
+                if ($currentOwned -lt $maxSpread) {
+                    $candidates = @($state.discovered_hosts | Where-Object { $_ -notin $state.owned_hosts })
+                    if ($candidates.Count -gt 0) {
+                        if ((Get-Random -Minimum 1 -Maximum 100) -le 50) {
+                            $target = Get-Random -InputObject $candidates
+                            $state.owned_hosts += $target
+                            $stateUpdated = $true
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($stateUpdated) {
+            $state | ConvertTo-Json -Depth 5 | Out-File $StatePath -Encoding utf8 -Force
+        }
       } catch {
-
-        $_
-
+        $_ | Out-String | Out-File "C:\ProgramData\RangeEngine\Queue\error.log" -Append
       }
-
-  loop: "{{ [ (atomic_primitives.primitives[primitive_key].variants | default([{'name': 'default', 'script': mapped_command}])) | first ] }}"
-
+  loop: "{{ primitives.primitives[primitive_key].variants | default([{'name': 'default', 'script': mapped_command}]) }}"
   loop_control:
-
     loop_var: variant_item
-
   when:
-
-    - selected_actor_techniques is defined
-
-    - (clean_technique in selected_actor_techniques) or (base_technique in selected_actor_techniques)
-
+    - ansible_os_family == 'Windows'
+    - (selected_actor_techniques is not defined) or (clean_technique in selected_actor_techniques) or (base_technique in selected_actor_techniques)
 
 # ========================================================================
-
 # EXECUTION LAYER
-
 # ========================================================================
-
 
 - name: Execute Technique Variants
-
   ansible.windows.win_powershell:
-
     script: |
-
       $ErrorActionPreference = "Stop"
 
-
       $Queue = "C:\ProgramData\RangeEngine\Queue"
-
       $Script = "$Queue\{{ clean_technique }}_{{ variant_item.name }}.ps1"
 
-
       $CurrentProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $PID"
-
       $ParentPID = $CurrentProcess.ParentProcessId
 
-
       $ScriptFailed = $false
-
       $CapturedOutput = ""
 
-
       try {
-
           if (Test-Path $Script) {
-
               $CapturedOutput = & $Script | Out-String
-
           } else {
-
               throw "Missing script file payload assignment: $Script"
-
           }
-
       } catch {
-
           $ScriptFailed = $true
-
           $CapturedOutput = $_ | Out-String
-
       } finally {
-
           $TelemetryResult = [ordered]@{
-
               failed    = $ScriptFailed
-
               ppid      = [string]$ParentPID
-
               pid       = [string]$PID
-
               technique = "{{ clean_technique }}"
-
               variant   = "{{ variant_item.name }}"
-
               log       = $CapturedOutput
-
           }
 
-          
-
+          # Prefix wrapper used to accurately extract target JSON stream from contamination noise
+          Write-Output "---TELEMETRY_START---"
           Write-Output ($TelemetryResult | ConvertTo-Json -Compress)
-
       }
-
-  loop: "{{ [ (atomic_primitives.primitives[primitive_key].variants | default([{'name': 'default'}])) | first ] }}"
-
+  loop: "{{ primitives.primitives[primitive_key].variants | default([{'name': 'default'}]) }}"
   loop_control:
-
     loop_var: variant_item
-
   ignore_errors: yes
-
   register: execution_results
-
   when:
-
-    - selected_actor_techniques is defined
-
-    - (clean_technique in selected_actor_techniques) or (base_technique in selected_actor_techniques)
-
+    - ansible_os_family == 'Windows'
+    - (selected_actor_techniques is not defined) or (clean_technique in selected_actor_techniques) or (base_technique in selected_actor_techniques)
 
 # ========================================================================
-
 # LOGGING
-
 # ========================================================================
-
 
 - name: Append Simulation Telemetry to Local Activity Log
-
   ansible.builtin.lineinfile:
-
     path: /tmp/adversary_activity
-
     create: yes
-
     mode: '0644'
-
     line: >
-
-      {% set telemetry = (loop_item.output | default(['{}'])) | join('') | from_json %}
-
+      {% set raw_stdout = loop_item.stdout | default('') %}
+      {% set json_match = raw_stdout | regex_search('(?<=---TELEMETRY_START---\s)[\s\S]*') %}
+      {% set telemetry = (json_match | default('{}')) | from_json %}
       [{{ lookup('pipe', 'date +"%Y-%m-%d %H:%M:%S"') }}]
-
       HOST: {{ inventory_hostname }} |
-
       MITRE: {{ clean_technique }} |
-
       PHASE: {{ item.phase | default('unknown') }} |
-
       PRIMITIVE: {{ primitive_key }} |
-
       VARIANT: {{ telemetry.variant | default('default') }} |
-
       PID: {{ telemetry.pid | default('UNKNOWN') }} |
-
       PARENT_PID: {{ telemetry.ppid | default('UNKNOWN') }} |
-
       STATUS: {{ 'FAILED' if (loop_item.failed | default(false) or telemetry.failed | default(false)) else 'EXECUTED' }}
-
   loop: "{{ execution_results.results | default([]) }}"
-
   loop_control:
-
     loop_var: loop_item
-
   delegate_to: localhost
-
   when:
-
     - execution_results is defined
-
     - not loop_item.skipped | default(false)
 
-
 # ========================================================================
-
 # STATE SYNC
-
 # ========================================================================
-
 
 - name: Pull state.json from host
-
   ansible.windows.win_shell: |
-
     if (Test-Path "C:\ProgramData\RangeEngine\state.json") {
-
       Get-Content "C:\ProgramData\RangeEngine\state.json" -Raw
-
     }
-
   register: state_data
-
+  when: ansible_os_family == 'Windows'
 
 - name: Extract owned hosts
-
   set_fact:
-
     new_owned_hosts: "{{ (state_data.stdout | default('{}') | from_json).owned_hosts | default([]) }}"
-
-  when: state_data.stdout is defined and state_data.stdout | length > 0
-
+  when:
+    - ansible_os_family == 'Windows'
+    - state_data.stdout is defined
+    - state_data.stdout | length > 0
 
 - name: Merge into global compromised_hosts
-
   set_fact:
-
     compromised_hosts: "{{ (compromised_hosts | default([]) + new_owned_hosts) | unique }}"
-
   delegate_to: localhost
-
   run_once: true
-
-
-# ========================================================================
-
-# CLEANUP
-
-# ========================================================================
-
-
-- name: Handle Poison Pill Cleanup
-
-  ansible.windows.win_powershell:
-
-    script: |
-
-      $Queue = "C:\ProgramData\RangeEngine\Queue"
-
-      if (Test-Path $Queue) {
-
-          Remove-Item "$Queue\*" -Force -Recurse -ErrorAction SilentlyContinue
-
-      }
-
-  when: item.name is defined and item.name | lower is search("poison")
+  when:
+    - ansible_os_family == 'Windows'
+    - state_data.stdout is defined

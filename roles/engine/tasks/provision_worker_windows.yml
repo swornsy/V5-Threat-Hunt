@@ -1,0 +1,37 @@
+---
+# ========================================================================
+# WINDOWS WORKER PROVISIONING (USER-SCOPED STATE — HARDENED)
+# ========================================================================
+
+- name: Verify Workspace Directory Hierarchy Exists
+  ansible.windows.win_file:
+    path: C:\ProgramData\RangeEngine\Queue
+    state: directory
+
+- name: Stage Windows worker script
+  ansible.windows.win_copy:
+    src: Run-CampaignWorker.ps1
+    dest: C:\ProgramData\RangeEngine\Queue\Run-CampaignWorker.ps1
+
+# Worker will handle user-scoped state at:
+#   $env:LOCALAPPDATA\RangeEngine\state.json
+# No need to create it here; worker bootstraps it if missing.
+
+- name: Create persistent hidden scheduled task (runs as compromised user)
+  community.windows.win_scheduled_task:
+    name: "RangeEngine_Persistent_Worker"
+    description: "User-scoped adversary simulation worker"
+    actions:
+      - path: powershell.exe
+        arguments: "-NoProfile -WindowStyle Hidden -File C:\ProgramData\RangeEngine\Queue\Run-CampaignWorker.ps1"
+    # Run as the current Ansible user (compromised user model)
+    username: "{{ ansible_user }}"
+    # CRITICAL: Allows execution in headless/detached lab environments without needing a password
+    logon_type: s4u
+    state: present
+    enabled: yes
+
+- name: Launch persistent worker thread
+  community.windows.win_scheduled_task:
+    name: "RangeEngine_Persistent_Worker"
+    state: run

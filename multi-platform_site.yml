@@ -1,0 +1,180 @@
+---
+# ========================================================================
+# V5 THREAT HUNT MULTI-PLATFORM ORCHESTRATION PROFILE (HARDENED + FIXED)
+# ========================================================================
+
+- name: V5 Threat Hunt Dynamic Manifest Compiler
+  hosts: windows:linux
+  gather_facts: yes
+  serial: 1
+
+  vars:
+    sim_duration: "72h"
+
+  pre_tasks:
+    # ----------------------------------------------------------
+    # Global Campaign Start Timestamp
+    # ----------------------------------------------------------
+    - name: Initialize campaign start timestamp
+      set_fact:
+        campaign_start_ts: "{{ lookup('pipe', 'date +%s') | int }}"
+      delegate_to: localhost
+      run_once: true
+      tags: always
+
+    # ----------------------------------------------------------
+    # Platform Phase Requirements
+    # ----------------------------------------------------------
+    - name: Initialize Platform Phase Requirements
+      set_fact:
+        valid_phases:
+          - initial-access
+          - execution
+          - persistence
+          - discovery
+          - lateral-movement
+          - exfiltration
+      tags: always
+
+    # ----------------------------------------------------------
+    # Load Shared Matrix Data
+    # ----------------------------------------------------------
+    - name: Load Shared Matrix Data
+      include_vars:
+        file: "vars/mitre_attack_matrix.yml"
+        name: raw_matrix
+      delegate_to: localhost
+      tags: always
+
+    # ----------------------------------------------------------
+    # Host-Specific Sequence Selection Logic (FIXED)
+    # ----------------------------------------------------------
+    - name: Compile Host-Specific Target Manifest
+      set_fact:
+        final_host_manifest: >-
+          {%- set target_actor = selected_actor_id | default('G0016') -%}
+          {%- set actor_data = raw_matrix['attack_matrix'][target_actor] | default({}) -%}
+          {%- set ns = namespace(host_sequence=[]) -%}
+          {%- set target_platform = 'windows' if ansible_os_family == 'Windows' else 'linux' -%}
+
+          {%- for phase in valid_phases -%}
+            {%- set options = actor_data.get(phase, []) -%}
+            {%- set platform_filtered = [] -%}
+
+            {%- for opt in options -%}
+              {%- if opt.platform | default('windows') | lower == target_platform -%}
+                {%- set _ = platform_filtered.append(opt) -%}
+              {%- endif -%}
+            {%- endfor -%}
+
+            {%- if platform_filtered | length > 0 -%}
+              {%- if phase == 'persistence' -%}
+                {%- set host_index = play_hosts.index(inventory_hostname) | default(0) -%}
+                {%- set selection_index = host_index % (platform_filtered | length) -%}
+                {%- set selected_tech = platform_filtered[selection_index] -%}
+              {%- else -%}
+                {%- set selected_tech = platform_filtered | random -%}
+              {%- endif -%}
+              {%- set tech_entry = selected_tech | combine({'phase': phase}) -%}
+              {%- set ns.host_sequence = ns.host_sequence + [tech_entry] -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {{ ns.host_sequence | to_json | trim }}
+      tags: always
+
+# ========================================================================
+# PLATFORM EXECUTION TARGET GROUPS
+# ========================================================================
+
+- name: Execute Windows Simulation Workers
+  hosts: windows
+  gather_facts: no
+  tasks:
+    - name: Ensure Windows Config Directory Exists
+      ansible.windows.win_file:
+        path: C:\ProgramData\RangeEngine\Config
+        state: directory
+
+    - name: Ensure Windows Queue Directory Exists
+      ansible.windows.win_file:
+        path: C:\ProgramData\RangeEngine\Queue
+        state: directory
+
+    - name: Deliver Unique Windows Configuration Manifest
+      ansible.windows.win_copy:
+        dest: C:\ProgramData\RangeEngine\Config\campaign_manifest.json
+        content: "{{ hostvars[inventory_hostname]['final_host_manifest'] | from_json | to_json }}"
+
+    - name: Write Windows Campaign Configuration
+      ansible.windows.win_copy:
+        dest: C:\ProgramData\RangeEngine\Config\campaign_config.json
+        content: >
+          {{
+            {
+              "sim_duration": sim_duration | default("72h"),
+              "step_count": (hostvars[inventory_hostname]['final_host_manifest'] | from_json) | length,
+              "campaign_start": campaign_start_ts | int
+            } | to_json
+          }}
+
+    # ----------------------------------------------------------
+    # FIXED: Worker must run as compromised user, not SYSTEM
+    # ----------------------------------------------------------
+    - name: Define Windows Persistent Engine Thread Task
+      community.windows.win_scheduled_task:
+        name: "RangeEngine_Worker"
+        description: "User-scoped persistent adversary simulation worker"
+        actions:
+          - path: powershell.exe
+            arguments: "-NoProfile -WindowStyle Hidden -File C:\ProgramData\RangeEngine\Queue\Run-CampaignWorker.ps1"
+        username: "{{ ansible_user }}"
+        logon_type: s4u
+        run_level: limited
+        state: present
+        enabled: yes
+
+    - name: Fire Windows Persistent Engine Thread Trigger
+      community.windows.win_scheduled_task:
+        name: "RangeEngine_Worker"
+        state: run
+
+# ========================================================================
+
+- name: Execute Linux Simulation Workers
+  hosts: linux
+  gather_facts: no
+  tasks:
+    - name: Provision Linux Workspace
+      ansible.builtin.file:
+        path: "/etc/range_engine/config"
+        state: directory
+        mode: '0755'
+      become: true
+
+    - name: Deliver Unique Linux Configuration Manifest
+      ansible.builtin.copy:
+        dest: "/etc/range_engine/config/campaign_manifest.json"
+        content: "{{ hostvars[inventory_hostname]['final_host_manifest'] | from_json | to_json }}"
+        mode: '0644'
+      become: true
+
+    - name: Write Linux Campaign Configuration
+      ansible.builtin.copy:
+        dest: "/etc/range_engine/config/campaign_config.json"
+        content: >
+          {{
+            {
+              "sim_duration": sim_duration | default("72h"),
+              "step_count": (hostvars[inventory_hostname]['final_host_manifest'] | from_json) | length,
+              "campaign_start": campaign_start_ts | int
+            } | to_json
+          }}
+        mode: '0644'
+      become: true
+
+    - name: Launch Linux Background Persistent Process
+      ansible.builtin.shell: |
+        nohup /usr/local/bin/range_worker.sh > /dev/null 2>&1 &
+      async: 10
+      poll: 0
+      become: false

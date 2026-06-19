@@ -1,37 +1,55 @@
 ---
-# ========================================================================
-# WINDOWS WORKER PROVISIONING (USER-SCOPED STATE — HARDENED)
+
 # ========================================================================
 
-- name: Verify Workspace Directory Hierarchy Exists
-  ansible.windows.win_file:
-    path: C:\ProgramData\RangeEngine\Queue
+# V5 THREAT HUNT CYBER RANGE WORKER PROVISIONING PROFILE (Windows)
+
+# ========================================================================
+
+
+- name: Create Range Engine Workspace Layout
+
+  win_file:
+
+    path: 'C:\ProgramData\RangeEngine\Queue'
+
     state: directory
 
-- name: Stage Windows worker script
-  ansible.windows.win_copy:
-    src: Run-CampaignWorker.ps1
-    dest: C:\ProgramData\RangeEngine\Queue\Run-CampaignWorker.ps1
 
-# Worker will handle user-scoped state at:
-#   $env:LOCALAPPDATA\RangeEngine\state.json
-# No need to create it here; worker bootstraps it if missing.
+- name: Deploy Campaign Worker Payload
 
-- name: Create persistent hidden scheduled task (runs as compromised user)
-  community.windows.win_scheduled_task:
-    name: "RangeEngine_Persistent_Worker"
-    description: "User-scoped adversary simulation worker"
+  win_copy:
+
+    src: files/Run-CampaignWorker.ps1
+
+    dest: 'C:\ProgramData\RangeEngine\Queue\Run-CampaignWorker.ps1'
+
+
+- name: Provision Scheduled Task for Persistent Worker Execution
+
+  win_scheduled_task:
+
+    name: 'V5_Threat_Hunt_Worker'
+
+    description: 'Executes curated adversary attack simulations and records telemetry.'
+
     actions:
+
       - path: powershell.exe
-        arguments: "-NoProfile -WindowStyle Hidden -File C:\ProgramData\RangeEngine\Queue\Run-CampaignWorker.ps1"
-    # Run as the current Ansible user (compromised user model)
-    username: "{{ ansible_user }}"
-    # CRITICAL: Allows execution in headless/detached lab environments without needing a password
-    logon_type: s4u
+
+        arguments: '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command "& { Set-Location C:\ProgramData\RangeEngine\Queue; .\Run-CampaignWorker.ps1 }"'
+
+    triggers:
+
+      - type: boot
+
+    username: 'SYSTEM'
+
     state: present
+
     enabled: yes
 
-- name: Launch persistent worker thread
-  community.windows.win_scheduled_task:
-    name: "RangeEngine_Persistent_Worker"
-    state: run
+
+- name: Force Start Adversary Emulation Worker Thread Immediately
+
+  win_command: schtasks.exe /run /tn "V5_Threat_Hunt_Worker"
